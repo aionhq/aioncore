@@ -1,0 +1,22 @@
+# Build artifacts
+*.o
+*.elf
+*.iso
+
+# Build directories
+isodir/
+target/
+
+# Editor and IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+.claude
+.claude.md
