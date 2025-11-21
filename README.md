@@ -20,6 +20,12 @@ make run
 make clean
 ```
 
+## First Boot
+
+![AionCore First Boot](docs/boot1.png)
+
+*AionCore v0.1.0 booting in QEMU - showing HAL initialization, timer calibration, and real-time tick updates*
+
 ## Current Status
 
 **Phase 1:** ✅ Foundation complete (HAL, per-CPU, IDT, VGA)
