@@ -549,3 +549,144 @@ Perfect! The kernel now prints correct debug output and we have a solid test fra
 ---
 
 **Last Updated:** 2025-11-22
+
+---
+
+## Chapter 4 – Tasks, Scheduling & Context Switching (Phase 3)
+
+**Goal:** Implement preemptive multitasking with O(1) scheduler and context switching.
+
+**Date:** 2025-11-22
+
+### What We Built
+
+**Task Management** (`core/task.c`, `include/kernel/task.h`):
+- Task Control Block (TCB) with CPU context (EDI, ESI, EBX, EBP, ESP, EIP)
+- Task states: READY, RUNNING, BLOCKED, ZOMBIE
+- Idle task (always schedulable, halts CPU when no work)
+- Bootstrap task pattern for pre-scheduler initialization code
+- Task wrapper for clean thread entry/exit
+
+**O(1) Scheduler** (`core/scheduler.c`, `include/kernel/scheduler.h`):
+- 256 priority levels (0-255, higher = more urgent)
+- Priority bitmap using `__builtin_clz` for O(1) highest-priority lookup
+- Per-priority circular doubly-linked queues
+- `schedule()` function: pick next, context switch, < 200 cycles total
+- `scheduler_tick()` called from timer interrupt (sets need_resched flag)
+
+**Context Switching** (`arch/x86/context.s`):
+- Assembly implementation following cdecl calling convention
+- Saves/restores callee-saved registers (EDI, ESI, EBX, EBP, ESP, EIP)
+- Uses `push ebp; mov ebp, esp` frame setup
+- Uses `call 1f; pop ecx` trick to capture return address
+- Uses `jmp *20(%edx)` to restore EIP (not push/ret)
+
+### Critical Bugs Encountered & Fixed
+
+**Bug 1: Task Stack Layout (CRITICAL)**
+- Problem: Stack arguments in wrong order for cdecl convention
+- Symptom: task_wrapper received arg=0, dereferenced NULL, instant crash
+- Fix: [esp] = return address, [esp+4] = first argument (correct cdecl order)
+- Learning: cdecl calling convention is unforgiving - must be exact
+
+**Bug 2: Context Switch Pattern (CRITICAL)**
+- Problem: Used incorrect ESP save/restore pattern
+- Symptom: Triple fault on first task switch (infinite boot loop)
+- Fix: Implemented proper pattern with frame setup, call/pop for EIP, jmp for restore
+- Learning: Context switch assembly requires established patterns, can't improvise
+
+**Bug 3: Makefile Clean Target**
+- Problem: Two `clean:` definitions - second replaced first
+- Symptom: `make clean` didn't clean anything
+- Fix: Consolidated into single clean target with dependencies
+- Learning: Make silently replaces duplicate targets
+
+**Bug 4: Stack Size Ignored**
+- Problem: Accepted any stack_size parameter but always allocated 4096 bytes
+- Symptom: Risk of memory corruption with larger stacks
+- Fix: Enforce stack_size == 4096 (only one page currently supported)
+
+**Bug 5: IRQ0 Masked**
+- Problem: PIC remapped with all IRQs masked (0xFF), IRQ0 never unmasked
+- Symptom: Timer interrupts couldn't fire (preemption impossible)
+- Fix: Added `irq_clear_mask(0)` after registering timer handler
+
+### Current State
+
+**Working:**
+- ✅ Task creation with proper stack setup
+- ✅ Context switching between kernel threads
+- ✅ Cooperative scheduling (manual yield)
+- ✅ O(1) scheduler queues and priority selection
+- ✅ No crashes, no boot loops!
+
+**Not Yet Tested:**
+- ⚠️ Timer-driven preemption (interrupts disabled for debugging)
+- ⚠️ Preemptive multitasking
+- ⚠️ Multiple concurrent threads
+
+### Key Design Decisions
+
+**Bootstrap Task Pattern:**
+- Created sentinel task representing pre-scheduler initialization code
+- Marked as ZOMBIE so it's never rescheduled
+- Current task pointer starts at bootstrap_task before first schedule()
+- Allows clean transition from initialization to first real task
+
+**Idle Task Always Ready:**
+- Idle task (priority 0) is always READY
+- Scheduler never has "nothing to run"
+- Idle thread just halts CPU until next interrupt
+- Ensures scheduler_pick_next() never returns NULL
+
+**Simplified Context:**
+- Only save/restore callee-saved registers (EDI, ESI, EBX, EBP, ESP, EIP)
+- Caller-saved registers (EAX, ECX, EDX) preserved by C calling convention
+- Segment registers not saved/restored (all tasks kernel mode for now)
+- Will need segment handling when adding usermode (Phase 4)
+
+### Remaining Work
+
+**High Priority:**
+1. Re-enable interrupts and test timer-driven preemption
+2. Stack fragility: 4KB with no guard pages (risk of silent corruption)
+
+**Medium Priority:**
+3. Static pt_storage bug: only one address space possible
+4. Bootstrap task lifecycle cleanup (stays ZOMBIE forever)
+
+**Low Priority (Phase 4):**
+5. Segment register handling for usermode (need GDT/TSS)
+
+### Lessons Learned
+
+**1. Incremental testing is critical**
+- Adding tasks + scheduler + context switch + timer all at once made debugging very hard
+- Should have tested context_switch in isolation first
+- Testing without interrupts proved context_switch bug was separate from IRQ bugs
+
+**2. cdecl calling convention is unforgiving**
+- Stack layout must be exact: [esp] = return, [esp+4] = arg1
+- Any deviation causes immediate crash
+- No compiler warnings for assembly mistakes
+
+**3. Context switch requires exact patterns**
+- Can't improvise with ESP save/restore
+- Must follow established patterns from literature
+- Getting it wrong causes triple fault (not a helpful error message!)
+
+**4. User feedback was key**
+- User identified all 5 bugs from code review
+- Provided exact fix for context_switch pattern
+- External code review caught what unit tests couldn't
+
+**5. Documentation during debugging helps**
+- Writing PHASE3_BROKEN.md while debugging helped organize thoughts
+- Root cause analysis document captured 5 hypotheses
+- Clear documentation made it easy to resume after interruptions
+
+---
+
+**Status:** Phase 3 is 70% complete. Cooperative scheduling works. Next: enable preemptive scheduling.
+
+**Last Updated:** 2025-11-22

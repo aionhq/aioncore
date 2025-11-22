@@ -15,6 +15,8 @@
 #include <kernel/timer.h>
 #include <kernel/hal.h>
 #include <kernel/percpu.h>
+#include <kernel/scheduler.h>
+#include <kernel/idt.h>
 #include <drivers/vga.h>
 
 // ========== PIT Hardware Constants ==========
@@ -173,7 +175,11 @@ void timer_init(uint32_t frequency_hz) {
     // Note: PIC remapping maps IRQ 0 to INT 32
     hal->irq_register(32, timer_interrupt_handler);
 
-    kprintf("[TIMER] Timer initialized successfully\n");
+    // Unmask IRQ 0 in the PIC so timer interrupts can fire
+    // By default, all IRQs are masked (0xFF) after pic_remap()
+    irq_clear_mask(0);
+
+    kprintf("[TIMER] Timer initialized successfully (IRQ 0 unmasked)\n");
 }
 
 /**
@@ -220,7 +226,18 @@ uint64_t timer_get_tsc_freq(void) {
  * Timer interrupt handler (IRQ 0 -> INT 32)
  *
  * Called on every timer tick. Updates per-CPU tick counter and
- * will eventually call scheduler preemption.
+ * sets scheduler preemption flag.
+ *
+ * NOTE: We do NOT call schedule() here because we're in interrupt context.
+ * Calling schedule() from an interrupt leaves the interrupt frame on the
+ * old task's stack without executing IRET, which corrupts the stack and
+ * causes triple faults.
+ *
+ * Instead, scheduler_tick() sets g_scheduler.need_resched, which will be
+ * checked at safe yield points (task_yield, syscalls, etc).
+ *
+ * TODO Phase 4: Add proper preemption by checking need_resched after IRET
+ * in a safe kernel entry stub.
  *
  * RT constraint: Must complete in <100 cycles
  */
@@ -229,10 +246,14 @@ void timer_interrupt_handler(void) {
     struct per_cpu_data* cpu = this_cpu();
     cpu->ticks++;
 
-    // TODO (Phase 3): Call timers_tick() for sleep queues
-    // TODO (Phase 3): Call scheduler_tick() for preemption
+    // Call scheduler tick (updates accounting, sets need_resched flag)
+    // This does NOT actually schedule, just sets a flag
+    scheduler_tick();
 
     // Send EOI to PIC (End of Interrupt)
     // IRQ 0 is on master PIC, so just send to master (port 0x20)
     hal->io_outb(0x20, 0x20);
+
+    // Return via IRET (do NOT call schedule() here!)
+    // Preemption will happen on next safe yield point
 }

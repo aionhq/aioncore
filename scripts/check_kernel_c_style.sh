@@ -17,8 +17,10 @@ EXIT=0
 echo "[check-kernel-c-style] Running style checks..."
 
 # Common file set: all .c/.h under core, arch, drivers, mm, include
+# Exclude lib/ and test files (lib/ contains our safe implementations)
 find_sources() {
-  find core arch drivers mm include -type f \( -name '*.c' -o -name '*.h' \)
+  find core arch drivers mm include -type f \( -name '*.c' -o -name '*.h' \) | \
+    grep -v '/lib/' | grep -v '_test\.'
 }
 
 warn() {

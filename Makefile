@@ -38,10 +38,13 @@ LDFLAGS := -T $(ARCH_DIR)/linker.ld \
 
 # Source files
 ASM_SOURCES := $(ARCH_DIR)/boot.s \
-               $(ARCH_DIR)/idt_asm.s
+               $(ARCH_DIR)/idt_asm.s \
+               $(ARCH_DIR)/context.s
 
 C_SOURCES := $(CORE_DIR)/init.c \
              $(CORE_DIR)/percpu.c \
+             $(CORE_DIR)/task.c \
+             $(CORE_DIR)/scheduler.c \
              $(ARCH_DIR)/hal.c \
              $(ARCH_DIR)/idt.c \
              $(ARCH_DIR)/timer.c \
@@ -122,10 +125,10 @@ test-kernel: clean
 	@echo "Running in-kernel tests in QEMU..."
 	@timeout 10 qemu-system-i386 -cdrom $(ISO) -nographic || true
 
-# Clean
-clean:
+# Clean build artifacts
+clean: clean-test
 	@echo "Cleaning..."
-	@find . -name "*.o" -type f -delete
+	@rm -f $(ALL_OBJECTS)
 	@rm -f $(KERNEL) $(ISO)
 	@rm -rf isodir
 	@echo "Clean complete"
@@ -170,7 +173,8 @@ HOST_CFLAGS := -std=gnu99 -O0 -g -Wall -Wextra -DHOST_TEST \
 # Test sources
 TEST_SOURCES := tests/test_main.c \
                 tests/pmm_test.c \
-                tests/kprintf_test.c
+                tests/kprintf_test.c \
+                tests/scheduler_test.c
 
 # Testable kernel code (compiled with HOST_TEST mocks)
 TESTABLE_SOURCES := mm/pmm.c
@@ -190,6 +194,3 @@ $(TEST_RUNNER): $(TEST_SOURCES) $(TESTABLE_SOURCES) tests/host_test.h
 # Clean test artifacts
 clean-test:
 	@rm -rf test_build
-
-# Include test cleanup in main clean target
-clean: clean-test

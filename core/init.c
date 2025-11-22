@@ -7,6 +7,8 @@
 #include <kernel/idt.h>
 #include <kernel/pmm.h>
 #include <kernel/mmu.h>
+#include <kernel/task.h>
+#include <kernel/scheduler.h>
 #include <drivers/vga.h>
 
 // Forward declarations
@@ -39,7 +41,7 @@ __attribute__((noreturn)) void kmain(uint32_t multiboot_magic, uint32_t multiboo
             KERNEL_VERSION_MINOR, KERNEL_VERSION_PATCH);
 
     vga_set_color(VGA_COLOR_LIGHT_CYAN, VGA_COLOR_BLACK);
-    kprintf("RT Microkernel - Phase 2\n");
+    kprintf("RT Microkernel - Phase 3\n");
 
     vga_set_color(VGA_COLOR_WHITE, VGA_COLOR_BLACK);
     kprintf("\n");
@@ -63,6 +65,13 @@ __attribute__((noreturn)) void kmain(uint32_t multiboot_magic, uint32_t multiboo
     // Phase 6: Initialize MMU and enable paging
     kprintf("\n");
     mmu_init();
+
+    // Phase 7: Initialize task subsystem
+    kprintf("\n");
+    task_init();
+
+    // Phase 8: Initialize scheduler
+    scheduler_init();
 
 #ifdef KERNEL_TESTS
     // Run kernel self-tests
@@ -95,40 +104,69 @@ __attribute__((noreturn)) void kmain(uint32_t multiboot_magic, uint32_t multiboo
     kprintf("  Kernel: 0x%08x\n", 0x100000);
     kprintf("  Per-CPU data: 0x%08x\n", (unsigned int)(uintptr_t)&per_cpu[0]);
 
+    // Test thread entry point
+    extern void test_thread_entry(void* arg);
+
+    // Create a test kernel thread
+    task_t* test_task = task_create_kernel_thread("test_thread",
+                                                    test_thread_entry,
+                                                    NULL,
+                                                    SCHED_DEFAULT_PRIORITY,
+                                                    4096);
+    if (test_task) {
+        scheduler_enqueue(test_task);
+        kprintf("[INIT] Test thread created and enqueued\n");
+    }
+
     vga_set_color(VGA_COLOR_YELLOW, VGA_COLOR_BLACK);
     kprintf("\nKernel initialization complete!\n");
 
     vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-    kprintf("Ready for next phase: paging and tasks\n");
+    kprintf("Ready: Tasks and scheduler operational\n");
 
-    // TODO: Phase 2 remaining: Initialize basic paging
-    // TODO: Phase 3: Task structures & scheduler
     // TODO: Phase 3: Syscall entry/exit
     // TODO: Phase 4: IPC & Capabilities
 
-    // Enable interrupts (timer will now fire)
-    kprintf("\nEnabling interrupts...\n");
-    hal->irq_enable();
-
-    // Idle loop - print timer ticks periodically
-    kprintf("Entering idle loop (timer running at 1000 Hz)...\n");
+    // DEBUG TEST 1: Test scheduler WITHOUT interrupts
+    // If this works, the problem is in Timer IRQ / ISR
+    kprintf("\nDEBUG: Testing scheduler without interrupts...\n");
     kprintf("Press Ctrl+A then X to exit QEMU\n\n");
 
-    uint64_t last_tick = 0;
-    while (1) {
-        // Print tick count every 1000 ticks (1 second at 1000 Hz)
-        uint64_t current_tick = this_cpu()->ticks;
-        if (current_tick - last_tick >= 1000) {
-            uint64_t time_us = hal->timer_read_us();
-            kprintf("Tick: %llu (Time: %llu.%06llu seconds)\n",
-                    current_tick,
-                    time_us / 1000000ULL,
-                    time_us % 1000000ULL);
-            last_tick = current_tick;
-        }
+    // DO NOT enable interrupts yet - test context switch first
+    // hal->irq_enable();  // DISABLED FOR TEST
 
+    // Drop into idle task - scheduler will take over
+    kprintf("[INIT] Yielding to scheduler (interrupts DISABLED)...\n");
+    task_yield();
+
+    // Should never reach here
+    kprintf("[INIT] ERROR: Returned from idle task!\n");
+    while (1) {
         hal->cpu_halt();
     }
+}
+
+// Test thread for Phase 3
+void test_thread_entry(void* arg) {
+    (void)arg;
+
+    kprintf("[TEST] Test thread started!\n");
+
+    // Run for a while, printing periodically
+    for (int i = 0; i < 10; i++) {
+        kprintf("[TEST] Test thread iteration %d\n", i);
+
+        // Yield to other tasks
+        task_yield();
+
+        // Simulate some work
+        for (volatile int j = 0; j < 100000; j++) {
+            // Busy wait
+        }
+    }
+
+    kprintf("[TEST] Test thread exiting\n");
+    task_exit(0);
 }
 
 // Kernel panic handler
