@@ -2,8 +2,8 @@
 .align 4
 multiboot_header:
     .long 0x1BADB002              # Multiboot magic number
-    .long 0x00                     # Flags
-    .long -(0x1BADB002 + 0x00)    # Checksum
+    .long 0x00000000               # Flags (none - let GRUB provide defaults)
+    .long -(0x1BADB002 + 0x00000000)    # Checksum
 
 .section .bss
 .align 16
@@ -24,7 +24,13 @@ _start:
     pushl $0
     popf
 
+    # Save multiboot info pointer (EBX contains multiboot_info struct pointer)
+    # EAX contains multiboot magic number
+    pushl %ebx                # Push multiboot_info pointer as second argument
+    pushl %eax                # Push multiboot magic as first argument
+
     # Call the C kernel main function
+    # void kmain(uint32_t multiboot_magic, uint32_t multiboot_info_addr)
     call kmain
 
     # If kmain returns, halt the CPU

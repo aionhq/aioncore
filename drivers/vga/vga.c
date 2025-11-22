@@ -58,7 +58,7 @@ void vga_set_color(enum vga_color fg, enum vga_color bg) {
 
 // ========== Minimal kprintf Implementation ==========
 
-// Helper: convert integer to string
+// Helper: convert 32-bit integer to string
 static int itoa(int32_t value, char* buf, int base) {
     char* ptr = buf;
     char* ptr1 = buf;
@@ -93,7 +93,7 @@ static int itoa(int32_t value, char* buf, int base) {
     return ptr1 - buf;
 }
 
-// Helper: convert unsigned integer to string
+// Helper: convert 32-bit unsigned integer to string
 static int utoa(uint32_t value, char* buf, int base) {
     char* ptr = buf;
     char* ptr1 = buf;
@@ -111,6 +111,8 @@ static int utoa(uint32_t value, char* buf, int base) {
         *ptr++ = "0123456789abcdefghijklmnopqrstuvwxyz"[tmp_value - value * base];
     } while (value);
 
+    // Save length before null terminator
+    int len = ptr - buf;
     *ptr-- = '\0';
 
     // Reverse string
@@ -120,11 +122,68 @@ static int utoa(uint32_t value, char* buf, int base) {
         *ptr1++ = tmp_char;
     }
 
-    return ptr1 - buf;
+    return len;
+}
+
+// Helper: convert 64-bit unsigned integer to string
+static int utoa64(uint64_t value, char* buf, int base) {
+    char* ptr = buf;
+    char* ptr1 = buf;
+    char tmp_char;
+    uint64_t tmp_value;
+
+    if (base < 2 || base > 36) {
+        *buf = '\0';
+        return 0;
+    }
+
+    if (value == 0) {
+        *ptr++ = '0';
+        *ptr = '\0';
+        return 1;
+    }
+
+    do {
+        tmp_value = value;
+        value /= base;
+        *ptr++ = "0123456789abcdefghijklmnopqrstuvwxyz"
+                 [tmp_value - value * base];
+    } while (value);
+
+    // Save length before null terminator
+    int len = ptr - buf;
+    *ptr-- = '\0';
+
+    // Reverse string
+    while (ptr1 < ptr) {
+        tmp_char = *ptr;
+        *ptr-- = *ptr1;
+        *ptr1++ = tmp_char;
+    }
+
+    return len;
+}
+
+// Helper: convert 64-bit signed integer to string
+static int itoa64(int64_t value, char* buf, int base) {
+    if (value < 0) {
+        int len = utoa64((uint64_t)(-value), buf + 1, base);
+        buf[0] = '-';
+        buf[len + 1] = '\0';
+        return len + 1;
+    }
+    return utoa64((uint64_t)value, buf, base);
 }
 
 // Minimal printf implementation
-// Supports: %d, %u, %x, %08x, %s, %c, %%
+// Supports:
+//   - %d, %i           (signed 32-bit)
+//   - %u               (unsigned 32-bit)
+//   - %x, %X           (hex)
+//   - %p               (pointer, 32-bit)
+//   - %s, %c, %%       (string, char, literal %)
+//   - Optional width / zero padding (e.g., %08x)
+//   - Optional 'l' length modifier (treated as 32-bit on this 32-bit kernel)
 int kprintf(const char* format, ...) {
     if (!vga) {
         return -1;
@@ -156,11 +215,36 @@ int kprintf(const char* format, ...) {
                 format++;
             }
 
+            // Optional length modifier: 'l' or 'll'
+            // On this 32-bit kernel, long is 32-bit and long long is 64-bit.
+            bool long_mod = false;
+            bool long_long_mod = false;
+            if (*format == 'l') {
+                if (*(format + 1) == 'l') {
+                    long_long_mod = true;
+                    format += 2;
+                } else {
+                    long_mod = true;
+                    format++;
+                }
+            }
+
             switch (*format) {
                 case 'd':  // Signed decimal
                 case 'i': {
-                    int32_t val = va_arg(args, int32_t);
-                    int len = itoa(val, buf, 10);
+                    int len = 0;
+                    if (long_long_mod) {
+                        long long v = va_arg(args, long long);
+                        len = itoa64((int64_t)v, buf, 10);
+                    } else if (long_mod) {
+                        long v = va_arg(args, long);
+                        int32_t val = (int32_t)v;
+                        len = itoa(val, buf, 10);
+                    } else {
+                        int v = va_arg(args, int);
+                        int32_t val = (int32_t)v;
+                        len = itoa(val, buf, 10);
+                    }
                     // Apply padding if specified
                     if (zero_pad && width > len) {
                         for (int i = len; i < width; i++) {
@@ -174,8 +258,19 @@ int kprintf(const char* format, ...) {
                 }
 
                 case 'u': {  // Unsigned decimal
-                    uint32_t val = va_arg(args, uint32_t);
-                    int len = utoa(val, buf, 10);
+                    int len = 0;
+                    if (long_long_mod) {
+                        unsigned long long v = va_arg(args, unsigned long long);
+                        len = utoa64((uint64_t)v, buf, 10);
+                    } else if (long_mod) {
+                        unsigned long v = va_arg(args, unsigned long);
+                        uint32_t val = (uint32_t)v;
+                        len = utoa(val, buf, 10);
+                    } else {
+                        unsigned int v = va_arg(args, unsigned int);
+                        uint32_t val = (uint32_t)v;
+                        len = utoa(val, buf, 10);
+                    }
                     // Apply padding if specified
                     if (zero_pad && width > len) {
                         for (int i = len; i < width; i++) {
@@ -190,8 +285,19 @@ int kprintf(const char* format, ...) {
 
                 case 'x':  // Hexadecimal (lowercase)
                 case 'X': {  // Hexadecimal (uppercase)
-                    uint32_t val = va_arg(args, uint32_t);
-                    int len = utoa(val, buf, 16);
+                    int len = 0;
+                    if (long_long_mod) {
+                        unsigned long long v = va_arg(args, unsigned long long);
+                        len = utoa64((uint64_t)v, buf, 16);
+                    } else if (long_mod) {
+                        unsigned long v = va_arg(args, unsigned long);
+                        uint32_t val = (uint32_t)v;
+                        len = utoa(val, buf, 16);
+                    } else {
+                        unsigned int v = va_arg(args, unsigned int);
+                        uint32_t val = (uint32_t)v;
+                        len = utoa(val, buf, 16);
+                    }
                     // Apply padding if specified
                     if (zero_pad && width > len) {
                         for (int i = len; i < width; i++) {
@@ -206,7 +312,8 @@ int kprintf(const char* format, ...) {
 
                 case 'p': {  // Pointer
                     vga->write("0x", 2);
-                    uint32_t val = va_arg(args, uint32_t);
+                    uintptr_t ptr = (uintptr_t)va_arg(args, void*);
+                    uint32_t val = (uint32_t)ptr;
                     int len = utoa(val, buf, 16);
                     // Pad to 8 digits
                     for (int i = len; i < 8; i++) {

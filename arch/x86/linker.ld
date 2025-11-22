@@ -4,6 +4,9 @@ SECTIONS
 {
     . = 1M;
 
+    /* Kernel start address */
+    _kernel_start = .;
+
     .multiboot ALIGN(4K) :
     {
         *(.multiboot)
@@ -35,6 +38,9 @@ SECTIONS
         *(COMMON)
         *(.bss)
     }
+
+    /* Kernel end address */
+    _kernel_end = .;
 
     /DISCARD/ :
     {

@@ -887,3 +887,67 @@ To keep the kernel small and trustworthy, primitives like units, threads, capabi
   - Add at least one user‑space integration test that runs through the public ABI.
 
 This strategy keeps the core primitives honest as the kernel evolves, while respecting the RT and microkernel constraints outlined earlier.
+
+---
+
+## 17. Hardening Profiles and Future Robustness Features
+
+The kernel is designed so that additional robustness can be enabled without changing the ABI or rewriting core subsystems.
+
+### 17.1 Compile-Time Profiles
+
+We use three conceptual profiles:
+
+- **DEV** (`CONFIG_PROFILE_DEV`):
+  - Maximum debug and checks.
+  - Extra invariants and verbose logging enabled.
+- **STANDARD** (`CONFIG_PROFILE_STANDARD`, default):
+  - Minimal overhead.
+  - Basic safety mechanisms available, heavy ones off by default.
+- **HARDENED** (`CONFIG_PROFILE_HARDENED`):
+  - Extra robustness features (scrubber, text hashing, watchdog) enabled.
+  - Suitable for more demanding environments.
+
+These profiles expand into feature flags via `include/kernel/config.h`, e.g.:
+
+- `CONFIG_ENABLE_DEBUG_ASSERTS`
+- `CONFIG_ENABLE_PARANOID_CHECKS`
+- `CONFIG_ENABLE_RAM_SCRUBBER`
+- `CONFIG_ENABLE_HASH_KERNEL_TEXT`
+- `CONFIG_ENABLE_LOG_VERBOSE`
+
+If a feature is not enabled at compile time, its code does not exist in the binary.
+
+### 17.2 Runtime Configuration (`kernel_config_t`)
+
+At runtime, all hardening-related knobs are grouped into a single `kernel_config_t` (see `ARCHITECTURE.md` hardening section). Examples:
+
+- Scrubber: enable/disable and rate (pages per second).
+- Invariants: enable/disable and sampling rate (e.g. 1/N operations).
+- Messaging: header checks always on; optional payload CRC sampling.
+- Watchdog: enabled flag and timeout in ms.
+- Kernel text verification: enabled flag and interval in seconds.
+
+Future components (scheduler, IPC, memory scrubber) will read from `kernel_config_t` when deciding how aggressively to apply checks, so the same binary can be tuned for different environments.
+
+### 17.3 Future Hooks (Not Implemented Yet)
+
+Planned but not yet implemented:
+
+- **Scheduler invariants:**
+  - Optional, sampled checks in `scheduler_tick()` to validate run queues and priorities.
+- **IPC robustness:**
+  - Always-on header sanity checks.
+  - Optional CRC or hash of payloads on a sampling basis.
+- **RAM scrubber:**
+  - Background thread/unit that periodically reads or scrubs pages based on configuration.
+- **Watchdog:**
+  - Kernel-level or management-unit-level watchdog that can reset or log on stalls.
+- **Kernel text hashing:**
+  - Periodic hashing of kernel text to detect corruption in hardened profiles.
+
+These should all be:
+
+- Compiled in or out by `CONFIG_ENABLE_*`.
+- Controlled at runtime by `kernel_config_t`.
+- Designed with RT constraints in mind (sampling, bounded work).

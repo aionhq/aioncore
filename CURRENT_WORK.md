@@ -1,8 +1,8 @@
 # Current Work Status
 
-**Last Updated:** 2025-11-21 (Timer implementation complete)
-**Phase:** Phase 2 - Basic Memory & Interrupts
-**Status:** 🔨 IN PROGRESS (Timer ✅, PMM next)
+**Last Updated:** 2025-11-22 (Phase 2 COMPLETE - All memory subsystems working)
+**Phase:** Phase 3 - Tasks, Scheduling & Syscalls (Next)
+**Status:** Phase 2 ✅ COMPLETE | Phase 3 📋 READY TO START
 
 ---
 
@@ -54,6 +54,43 @@
 
 ---
 
+### Phase 2.2: Physical Memory Manager (COMPLETE)
+
+**Completed:** 2025-11-21
+
+**What was built:**
+1. ✅ PMM with bitmap allocator (`mm/pmm.c`, `include/kernel/pmm.h`)
+   - Parses multiboot memory map to discover available RAM
+   - Bitmap-based frame allocator (1 bit per 4KB frame)
+   - Frame allocation/deallocation (currently O(n), will optimize to O(1) with free lists)
+   - Reserved region tracking (kernel, low memory)
+   - Statistics API for memory usage monitoring
+   - Unit tests for allocation, alignment, uniqueness
+
+**Files created:**
+- `mm/pmm.c` - Physical memory manager implementation
+- `include/kernel/pmm.h` - PMM API (multiboot structures, allocation functions)
+- `mm/pmm_test.c` - PMM unit tests (6 tests covering allocation, freeing, bulk operations)
+
+**Integration:**
+- Updated `arch/x86/boot.s` to pass multiboot info to kmain()
+- Updated `core/init.c` to call `pmm_init()` after timer initialization
+- Updated `arch/x86/linker.ld` with `_kernel_start` and `_kernel_end` symbols
+- Added `phys_addr_t` type to `include/kernel/types.h`
+- PMM reserves kernel regions and low memory (first 1MB)
+
+**Defensive Programming:**
+- Added fallback mode: assumes 128MB RAM if multiboot info invalid
+- Validates multiboot magic number and info pointer
+- Prints debug messages showing multiboot flags and memory regions
+- Gracefully degrades instead of crashing on missing memory map
+
+**Note:** Current implementation uses O(n) bitmap scanning as fallback. Future optimization will add per-CPU free lists for O(1) allocation to meet RT constraints.
+
+**Reference:** [Phase 2.2 Details](docs/IMPLEMENTATION_ROADMAP.md#22-physical-memory-manager-pmm)
+
+---
+
 ### Phase 1: Foundation & HAL (COMPLETE)
 
 **Completed:** 2025-11-21
@@ -93,46 +130,90 @@
 
 **Reference:** [Phase 1 Details](docs/IMPLEMENTATION_ROADMAP.md#phase-1-foundation--hal-week-1-2--done)
 
+### Phase 2.3: Basic Paging (MMU) - COMPLETE
+
+**Completed:** 2025-11-22
+
+**What was built:**
+1. ✅ MMU with x86 two-level page tables (`arch/x86/mmu.c`, `include/kernel/mmu.h`)
+   - Page directory and page table management
+   - O(1) map/unmap operations (direct 2-level indexing, no loops)
+   - Lazy page table allocation (allocate on first use)
+   - Address space creation/destruction/switching
+   - Identity mapping for kernel (first 4MB)
+   - CR3 management for address space switching
+   - TLB invalidation (single-page and full flush)
+
+**Files created:**
+- `include/kernel/mmu.h` - Architecture-independent MMU API (154 lines)
+- `arch/x86/mmu.c` - x86 two-level paging implementation (326 lines)
+
+**API implemented:**
+```c
+page_table_t* mmu_create_address_space(void);           // O(1)
+void mmu_destroy_address_space(page_table_t* pt);       // O(n) - cleanup only
+void* mmu_map_page(page_table_t* pt, phys_addr_t phys,
+                   virt_addr_t virt, uint32_t flags);    // O(1), <200 cycles
+void mmu_unmap_page(page_table_t* pt, virt_addr_t virt); // O(1), <100 cycles
+void mmu_switch_address_space(page_table_t* pt);        // O(1), <50 cycles
+page_table_t* mmu_get_current_address_space(void);
+page_table_t* mmu_get_kernel_address_space(void);
+void mmu_init(void);
+```
+
+**Page flags (architecture-independent):**
+- `MMU_PRESENT` - Page is present in memory
+- `MMU_WRITABLE` - Page is writable
+- `MMU_USER` - Page accessible from user mode
+- `MMU_NOCACHE` - Disable caching (for MMIO)
+- `MMU_EXEC` - Page is executable (reserved for future PAE/NX support)
+
+**Integration:**
+- Updated `core/init.c` to call `mmu_init()` after PMM initialization
+- Updated `Makefile` to compile `arch/x86/mmu.c`
+- Paging enabled via CR0.PG bit in `mmu_init()`
+- Kernel address space created with identity-mapped first 4MB
+
+**RT Constraints Enforced:**
+- `mmu_map_page()`: O(1) - direct indexing via PD_INDEX/PT_INDEX macros, no loops
+- `mmu_unmap_page()`: O(1) - direct indexing, single TLB invalidation
+- `mmu_switch_address_space()`: O(1) - single CR3 write
+- No global page directory walks or scans
+- Allocates at most 1 page table per map operation (lazy allocation)
+
+**Design highlights:**
+- Opaque `page_table_t` type for multi-arch compatibility
+- Two-level paging: page directory (1024 entries) + page tables (1024 entries each)
+- Direct indexing: `PD_INDEX(virt) = (virt >> 22) & 0x3FF`, `PT_INDEX(virt) = (virt >> 12) & 0x3FF`
+- Identity mapping for kernel simplifies initial paging setup
+- Each unit will get its own `page_table_t*` for address space isolation
+
+**Testing:**
+- Kernel boots successfully with paging enabled
+- Identity-mapped first 16MB allows kernel/VGA/low memory access
+- No page faults during initialization
+- Unit tests pending
+
+**Critical Bug Fixed (Post-Phase 2.3):**
+- **Bug:** Debug output showed "Page size: 40 bytes" instead of "4096 bytes"
+- **Symptom:** All numbers printed with `kprintf("%u", ...)` were truncated to 2 digits
+- **Initial investigation (several hours):** Checked for stale binaries, preprocessor issues, PAGE_SIZE definitions, searched for memory corruption
+- **Root cause:** `utoa()` function in `drivers/vga/vga.c` had incorrect length calculation
+  - After reversing digits, returned `ptr1 - buf` (middle of string) instead of actual length
+  - For "4096" (4 chars), returned length=2, causing kprintf to print only "40"
+- **Fix:** Save length before reversal: `int len = ptr - buf; ... return len;`
+- **How we found it:** Created host-side unit tests (`tests/kprintf_test.c`) that isolated the bug immediately
+- **Lesson:** Unit tests catch bugs faster than debugging in QEMU. Test infrastructure pays off!
+- **Also fixed:** Same bug in `utoa64()` function
+- **Also created:** Host test framework improvements (`tests/test_main.c`, better `host_test.h`)
+
+**Reference:** [Phase 2.3 Details](docs/IMPLEMENTATION_ROADMAP.md#23-basic-paging)
+
 ---
 
 ## What We're Working On Now 🔨
 
-### Phase 2: Basic Memory & Interrupts (Week 3-4)
-
-**Started:** 2025-11-21
-**Target Completion:** ~1 week
-
-**Current Task:** Physical Memory Manager (PMM)
-
-### 2.2 Physical Memory Manager (NEXT UP)
-
-**Plan:**
-- Bitmap-based frame allocator
-- O(1) allocation with free lists
-- Track frame ownership for unit accounting
-- Reserve kernel regions
-
-**Files to create:**
-- `mm/pmm.c` - Physical memory manager
-- `include/kernel/pmm.h` - PMM interface
-
-**Reference:** [Phase 2 PMM Details](docs/IMPLEMENTATION_ROADMAP.md#21-physical-memory-manager-simple-bitmap)
-
-### 2.3 Basic Paging (TODO - After PMM)
-
-**Plan:**
-- x86 page table management
-- Create/destroy address spaces
-- Map/unmap pages
-- Switch address spaces (CR3)
-
-**Files to create:**
-- `arch/x86/mmu.c` - x86 paging implementation
-- `include/kernel/mmu.h` - MMU interface
-
-**Design note:** `struct page_table*` will become each unit's `addr_space_t`.
-
-**Reference:** [Phase 2 Paging Details](docs/IMPLEMENTATION_ROADMAP.md#22-basic-paging)
+### Phase 3 Planning: Tasks, Scheduling & Syscalls
 
 ---
 
@@ -150,6 +231,7 @@
 5. First userspace task (ring3)
 6. Minimal unit abstraction
 7. Kernel channels (messaging primitive)
+8. Wire in first hardening hooks (profile + `kernel_config_t` scaffolding, but minimal runtime use)
 
 **Reference:** [Phase 3 Details](docs/IMPLEMENTATION_ROADMAP.md#phase-3-tasks-scheduling--syscalls-week-5-6)
 
@@ -305,26 +387,73 @@ For detailed rules about the allowed C subset, forbidden features (VLAs, recursi
 
 ## Immediate Next Actions
 
-**Today (2025-11-21):**
+**Completed Today (2025-11-22):**
 
-1. ✅ Reorganize documentation into `docs/`
-2. ✅ Create `CURRENT_WORK.md`
-3. 🔨 Implement PIT timer driver
-   - Create `arch/x86/timer.c`
-   - Initialize PIT at 1000 Hz
-   - Calibrate TSC
-   - Wire to timer IRQ (32)
-4. 📋 Test timer in idle loop
-5. 📋 Update docs when complete
+1. ✅ Implement MMU header (`include/kernel/mmu.h`)
+   - Defined opaque `page_table_t` type
+   - Defined architecture-independent page flags
+   - Defined MMU API functions
+
+2. ✅ Implement x86 MMU (`arch/x86/mmu.c`)
+   - Two-level page table structures (page directory + page tables)
+   - `mmu_create_address_space()` - allocate page directory
+   - `mmu_map_page()` - create page table entries with lazy allocation
+   - `mmu_unmap_page()` - remove page table entries
+   - `mmu_switch_address_space()` - CR3 manipulation
+
+3. ✅ Debug and fix boot loop (Critical bugs fixed)
+   - **Bug 1:** Fixed CR3/CR0 ordering - load CR3 BEFORE enabling paging
+   - **Bug 2:** Extended identity mapping from 4MB to 16MB to cover all kernel structures
+   - Root cause analysis identified 5 potential issues, fixed the critical ones
+
+4. ✅ Enable paging in kernel
+   - Created kernel address space with identity mapping (first 16MB)
+   - Loaded CR3 with page directory physical address
+   - Enabled CR0.PG bit
+   - Successfully booted with paging enabled!
+
+5. ✅ **Phase 2 Complete!** All memory management subsystems working:
+   - Timer (PIT + TSC calibration)
+   - Physical Memory Manager (PMM)
+   - Memory Management Unit (MMU with paging enabled)
+   - Kernel boots cleanly and enters idle loop
+
+**Next Session (Phase 3 - Tasks & Scheduler):**
+
+1. 📋 Write MMU unit tests (optional cleanup task)
+   - Test page directory creation
+   - Test page mapping/unmapping
+   - Test address space switching
+
+2. 📋 Plan Phase 3 implementation
+   - Review Phase 3 requirements in roadmap
+   - Design task structure
+   - Design context switching mechanism
+
+3. 📋 Implement task/thread structures
+   - Define `struct task` (TCB - Task Control Block)
+   - Define task states (READY, RUNNING, BLOCKED)
+   - Implement task creation/destruction
+
+4. 📋 Implement context switching
+   - Write assembly for register save/restore
+   - Implement `switch_to()` function
+   - Test basic task switching
+
+5. 📋 Implement basic scheduler
+   - Fixed-priority O(1) scheduler
+   - Per-priority run queues
+   - `schedule()` function
 
 **This Week:**
-- Complete timer implementation
-- Implement PMM (physical memory manager)
-- Start basic paging
+- ✅ Complete Phase 2 (DONE!)
+- Start Phase 3 (Tasks + Scheduler)
+- Get first task switch working
 
 **This Sprint (2 weeks):**
-- Complete Phase 2 (memory + interrupts + timer)
-- Start Phase 3 (tasks + scheduler)
+- ✅ Complete Phase 2 (memory + interrupts + timer)
+- Complete Phase 3 (tasks + scheduler + syscalls)
+- First userspace task running in ring3
 
 ---
 

@@ -5,6 +5,9 @@
 #include <stddef.h>
 #include <stdbool.h>
 
+// Physical address type
+typedef uintptr_t phys_addr_t;
+
 // Null pointer
 #ifndef NULL
 #define NULL ((void*)0)

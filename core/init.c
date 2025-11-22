@@ -5,6 +5,8 @@
 #include <kernel/percpu.h>
 #include <kernel/types.h>
 #include <kernel/idt.h>
+#include <kernel/pmm.h>
+#include <kernel/mmu.h>
 #include <drivers/vga.h>
 
 // Forward declarations
@@ -16,7 +18,8 @@ extern void hal_x86_init(void);
 #define KERNEL_VERSION_PATCH 0
 
 // Kernel entry point (called from boot.s)
-__attribute__((noreturn)) void kmain(void) {
+// Parameters: multiboot_magic, multiboot_info_addr (passed from boot.s)
+__attribute__((noreturn)) void kmain(uint32_t multiboot_magic, uint32_t multiboot_info_addr) {
     // Phase 1: Initialize HAL (Hardware Abstraction Layer)
     // This must happen first - provides CPU, interrupt, I/O operations
     hal_x86_init();
@@ -51,6 +54,15 @@ __attribute__((noreturn)) void kmain(void) {
     // Initialize PIT at 1000 Hz and calibrate TSC
     kprintf("\n");
     hal->timer_init(1000);
+
+    // Phase 5: Initialize physical memory manager
+    kprintf("\n");
+    struct multiboot_info *mbi = (struct multiboot_info *)(uintptr_t)multiboot_info_addr;
+    pmm_init(multiboot_magic, mbi);
+
+    // Phase 6: Initialize MMU and enable paging
+    kprintf("\n");
+    mmu_init();
 
 #ifdef KERNEL_TESTS
     // Run kernel self-tests
@@ -87,9 +99,8 @@ __attribute__((noreturn)) void kmain(void) {
     kprintf("\nKernel initialization complete!\n");
 
     vga_set_color(VGA_COLOR_LIGHT_GREY, VGA_COLOR_BLACK);
-    kprintf("Ready for next phase: memory management\n");
+    kprintf("Ready for next phase: paging and tasks\n");
 
-    // TODO: Phase 2 remaining: Initialize physical memory manager
     // TODO: Phase 2 remaining: Initialize basic paging
     // TODO: Phase 3: Task structures & scheduler
     // TODO: Phase 3: Syscall entry/exit

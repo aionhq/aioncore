@@ -664,6 +664,7 @@ After all phases:
 7. **Arch in `arch/`:** Keep context switch, page tables, ISR stubs in `arch/` so unit/thread/channel logic stays generic C
 8. **No POSIX in Kernel:** Fork/exec/signals live in a userspace “personality” built on units, not in the core ABI
 9. **Narrow ABI Header & Vertical Slices:** Treat a single syscall header as the contract, and grow the kernel via small end‑to‑end slices (timer→scheduler, PMM→VM, channel→syscall) rather than broad layers
+10. **Profiles + Config:** Use simple build-time profiles (DEV/STANDARD/HARDENED) and a single `kernel_config_t` runtime struct to control optional hardening features without multiple forks of the codebase.
 
 ## Current Phase
 

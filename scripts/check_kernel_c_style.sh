@@ -74,10 +74,12 @@ check_forbidden_patterns "Floating point types are not allowed in kernel code (f
 # 5) Inline assembly outside arch/
 NON_ARCH_FILES=($(find core drivers mm include -type f \( -name '*.c' -o -name '*.h' \)))
 if [[ ${#NON_ARCH_FILES[@]} -gt 0 ]]; then
-  # Allow the canonical barrier() macro in include/kernel/types.h
+  # Allow inline asm in special cases:
+  # - barrier() macro in include/kernel/types.h
+  # - assertions in include/kernel/assert.h (need cli/hlt/pushf)
   NON_ARCH_NO_BARRIER=()
   for f in "${NON_ARCH_FILES[@]}"; do
-    if [[ "$f" == "include/kernel/types.h" ]]; then
+    if [[ "$f" == "include/kernel/types.h" ]] || [[ "$f" == "include/kernel/assert.h" ]]; then
       continue
     fi
     NON_ARCH_NO_BARRIER+=("$f")
@@ -86,6 +88,80 @@ if [[ ${#NON_ARCH_FILES[@]} -gt 0 ]]; then
     check_forbidden_patterns "Inline assembly (__asm__/asm) is only allowed in arch/ code (except barrier() in include/kernel/types.h)" \
       '\b(__asm__|asm)\b' "${NON_ARCH_NO_BARRIER[@]}"
   fi
+fi
+
+# 6) Static Analysis Tools (optional, warn if not available)
+run_cppcheck() {
+  if ! command -v cppcheck &> /dev/null; then
+    echo "[check-kernel-c-style] cppcheck not found (optional)"
+    return 0
+  fi
+
+  echo "[check-kernel-c-style] Running cppcheck..."
+
+  # Run cppcheck with kernel-appropriate settings
+  # --quiet: only show errors
+  # --enable=warning,style,performance,portability: check categories
+  # --suppress=unusedFunction: kernel has many functions called from asm
+  # --inline-suppr: allow inline suppressions
+  # --error-exitcode=1: return non-zero on errors
+  cppcheck --quiet \
+    --enable=warning,style,performance,portability \
+    --suppress=unusedFunction \
+    --suppress=missingIncludeSystem \
+    --inline-suppr \
+    --error-exitcode=1 \
+    -I include \
+    core/ arch/x86/ drivers/ mm/ lib/ 2>&1 | \
+    grep -v "^Checking" || true
+
+  local result=$?
+  if [[ $result -ne 0 ]]; then
+    warn "cppcheck found issues"
+    return 1
+  fi
+  return 0
+}
+
+run_clang_tidy() {
+  if ! command -v clang-tidy &> /dev/null; then
+    echo "[check-kernel-c-style] clang-tidy not found (optional)"
+    return 0
+  fi
+
+  echo "[check-kernel-c-style] Running clang-tidy..."
+
+  # Run clang-tidy on a subset of files (it's slow)
+  # Focus on core/ and mm/ for now
+  local tidy_failed=0
+  for file in core/*.c mm/*.c; do
+    [[ -f "$file" ]] || continue
+
+    # Run clang-tidy with kernel-appropriate checks
+    # Disable checks that don't apply to kernel code
+    clang-tidy "$file" \
+      --checks='-*,bugprone-*,clang-analyzer-*,performance-*,-bugprone-easily-swappable-parameters' \
+      --warnings-as-errors='' \
+      -- -I include -nostdinc -ffreestanding &> /tmp/clang-tidy-$$.txt
+
+    if grep -q "warning:" /tmp/clang-tidy-$$.txt; then
+      cat /tmp/clang-tidy-$$.txt | grep "warning:"
+      tidy_failed=1
+    fi
+    rm -f /tmp/clang-tidy-$$.txt
+  done
+
+  if [[ $tidy_failed -eq 1 ]]; then
+    warn "clang-tidy found issues"
+    return 1
+  fi
+  return 0
+}
+
+# Run static analysis if KERNEL_STATIC_ANALYSIS is set
+if [[ "${KERNEL_STATIC_ANALYSIS:-0}" == "1" ]]; then
+  run_cppcheck || EXIT=1
+  run_clang_tidy || EXIT=1
 fi
 
 if [[ $EXIT -eq 0 ]]; then

@@ -3,9 +3,9 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <kernel/types.h>
 
-// Physical and virtual addresses
-typedef uint32_t phys_addr_t;
+// Virtual address type (phys_addr_t is defined in types.h)
 typedef uint32_t virt_addr_t;
 
 // Hardware Abstraction Layer Operations

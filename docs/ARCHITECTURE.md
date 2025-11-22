@@ -388,6 +388,67 @@ bool verify_module_signature(struct module* mod) {
 5. **Verifiable:** Small TCB enables formal verification
 6. **Defense in Depth:** IOMMU, NX bit, ASLR, stack canaries
 
+## Hardening Profiles and Runtime Configuration
+
+In addition to the core design, the kernel supports the idea of **optional hardening** that can be enabled without forking the codebase.
+
+### Compile-Time Profiles
+
+We define three build-time profiles:
+
+- `CONFIG_PROFILE_DEV`
+- `CONFIG_PROFILE_STANDARD` (default)
+- `CONFIG_PROFILE_HARDENED`
+
+From these, we derive a small set of feature flags (see `include/kernel/config.h`):
+
+- `CONFIG_ENABLE_DEBUG_ASSERTS`
+- `CONFIG_ENABLE_PARANOID_CHECKS`
+- `CONFIG_ENABLE_RAM_SCRUBBER`
+- `CONFIG_ENABLE_HASH_KERNEL_TEXT`
+- `CONFIG_ENABLE_LOG_VERBOSE`
+
+Profiles decide **which mechanisms exist in the binary**; mechanisms that are not enabled are compiled out and incur no runtime cost.
+
+### Runtime Configuration (`kernel_config_t`)
+
+At runtime, all tunable hardening knobs are grouped into a single struct:
+
+```c
+typedef struct {
+    uint32_t version;
+
+    // Scrubber
+    uint8_t  ram_scrubber_enabled;
+    uint32_t ram_scrubber_rate_pages_per_sec;
+
+    // Invariants
+    uint8_t  invariants_enabled;
+    uint8_t  invariants_sample_rate; // 1 = always, 10 = 1/10 ops
+
+    // Messaging
+    uint8_t  msg_header_checks_enabled;
+    uint8_t  msg_payload_crc_enabled;
+    uint8_t  msg_crc_sample_rate;
+
+    // Watchdog
+    uint8_t  watchdog_enabled;
+    uint32_t watchdog_timeout_ms;
+
+    // Kernel text verification
+    uint8_t  hash_kernel_text_enabled;
+    uint32_t hash_kernel_text_interval_sec;
+} kernel_config_t;
+```
+
+`kernel_config_init_defaults()` will use compile-time feature flags to set sane defaults per profile (e.g., DEV vs STANDARD vs HARDENED).
+
+Future mechanisms (RAM scrubber, invariants, message CRC, watchdog, text hashing) will:
+
+- Be compiled in or out via `CONFIG_ENABLE_*`.
+- Read intensity/enable flags from `kernel_config_t`.
+- Use **sampling** (e.g. 1/N checks) to remain RT-compliant.
+
 ## Performance Goals
 
 | Operation | Target | Rationale |

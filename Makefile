@@ -1,4 +1,4 @@
-.PHONY: all clean run help
+.PHONY: all clean run help analyze test
 
 # Build configuration
 CC := i686-elf-gcc
@@ -45,6 +45,8 @@ C_SOURCES := $(CORE_DIR)/init.c \
              $(ARCH_DIR)/hal.c \
              $(ARCH_DIR)/idt.c \
              $(ARCH_DIR)/timer.c \
+             $(ARCH_DIR)/mmu.c \
+             $(MM_DIR)/pmm.c \
              $(LIB_DIR)/string.c \
              $(DRIVERS_DIR)/vga/vga.c \
              $(DRIVERS_DIR)/vga/vga_text.c
@@ -113,17 +115,17 @@ run: $(ISO)
 	@echo "Starting QEMU..."
 	@qemu-system-i386 -cdrom $(ISO)
 
-# Build and run with tests enabled
-test: clean
+# Build and run with in-kernel tests enabled
+test-kernel: clean
 	@echo "Building with KERNEL_TESTS=1..."
 	@$(MAKE) KERNEL_TESTS=1 all
-	@echo "Running tests in QEMU..."
+	@echo "Running in-kernel tests in QEMU..."
 	@timeout 10 qemu-system-i386 -cdrom $(ISO) -nographic || true
 
 # Clean
 clean:
 	@echo "Cleaning..."
-	@rm -f $(ALL_OBJECTS)
+	@find . -name "*.o" -type f -delete
 	@rm -f $(KERNEL) $(ISO)
 	@rm -rf isodir
 	@echo "Clean complete"
@@ -143,3 +145,51 @@ deps:
 .PHONY: check-style
 check-style:
 	@./scripts/check_kernel_c_style.sh
+
+# Full static analysis (requires cppcheck and clang-tidy)
+analyze:
+	@echo "Running full static analysis..."
+	@KERNEL_STATIC_ANALYSIS=1 ./scripts/check_kernel_c_style.sh
+	@echo ""
+	@echo "Static analysis complete!"
+	@echo ""
+	@echo "Tools used:"
+	@command -v cppcheck &> /dev/null && echo "  ✓ cppcheck" || echo "  ✗ cppcheck (not installed)"
+	@command -v clang-tidy &> /dev/null && echo "  ✓ clang-tidy" || echo "  ✗ clang-tidy (not installed)"
+	@echo ""
+	@echo "Install missing tools:"
+	@echo "  macOS: brew install cppcheck llvm"
+	@echo "  Linux: apt install cppcheck clang-tidy"
+
+# Host-side unit tests (run without booting kernel)
+# Host test configuration
+HOST_CC := gcc
+HOST_CFLAGS := -std=gnu99 -O0 -g -Wall -Wextra -DHOST_TEST \
+               -Iinclude -fno-builtin
+
+# Test sources
+TEST_SOURCES := tests/test_main.c \
+                tests/pmm_test.c \
+                tests/kprintf_test.c
+
+# Testable kernel code (compiled with HOST_TEST mocks)
+TESTABLE_SOURCES := mm/pmm.c
+
+# Test runner binary
+TEST_RUNNER := test_build/test_runner
+
+# Build and run host tests
+test: $(TEST_RUNNER)
+	@echo "Running host-side unit tests..."
+	@./$(TEST_RUNNER)
+
+$(TEST_RUNNER): $(TEST_SOURCES) $(TESTABLE_SOURCES) tests/host_test.h
+	@mkdir -p test_build
+	@$(HOST_CC) $(HOST_CFLAGS) -o $@ $(TEST_SOURCES) $(TESTABLE_SOURCES)
+
+# Clean test artifacts
+clean-test:
+	@rm -rf test_build
+
+# Include test cleanup in main clean target
+clean: clean-test
