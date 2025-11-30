@@ -75,11 +75,14 @@ help:
 	@echo "Modern Modular Kernel Build System"
 	@echo ""
 	@echo "Available targets:"
-	@echo "  make          - Build kernel ISO"
-	@echo "  make run      - Build and run in QEMU"
-	@echo "  make test     - Build with tests and run in QEMU"
-	@echo "  make clean    - Clean build artifacts"
-	@echo "  make help     - Show this message"
+	@echo "  make              - Build kernel ISO"
+	@echo "  make run          - Build and run in QEMU (fast - direct kernel boot)"
+	@echo "                      Shows GUI window + serial output in terminal"
+	@echo "  make run-nographic - Run in QEMU without GUI (serial console only)"
+	@echo "  make run-iso      - Build and run in QEMU (slow - ISO boot via GRUB)"
+	@echo "  make test         - Build with tests and run in QEMU"
+	@echo "  make clean        - Clean build artifacts"
+	@echo "  make help         - Show this message"
 	@echo ""
 	@echo "Architecture: x86 (32-bit)"
 	@echo "Modules: HAL, Per-CPU, VGA driver, Timer"
@@ -113,17 +116,27 @@ $(ISO): $(KERNEL) grub.cfg
 	@echo ""
 	@echo "Build complete: $(ISO)"
 
-# Run in QEMU
-run: $(ISO)
-	@echo "Starting QEMU..."
+# Run in QEMU (fast boot - directly load kernel without ISO)
+run: $(KERNEL)
+	@echo "Starting QEMU (direct kernel boot)..."
+	@qemu-system-i386 -kernel $(KERNEL) -serial stdio
+
+# Run in QEMU with nographic mode (serial console only, no GUI window)
+run-nographic: $(KERNEL)
+	@echo "Starting QEMU (direct kernel boot, no GUI)..."
+	@qemu-system-i386 -kernel $(KERNEL) -nographic
+
+# Run in QEMU with ISO (slower, uses GRUB)
+run-iso: $(ISO)
+	@echo "Starting QEMU (ISO boot via GRUB)..."
 	@qemu-system-i386 -cdrom $(ISO)
 
 # Build and run with in-kernel tests enabled
 test-kernel: clean
 	@echo "Building with KERNEL_TESTS=1..."
-	@$(MAKE) KERNEL_TESTS=1 all
+	@$(MAKE) KERNEL_TESTS=1 $(KERNEL)
 	@echo "Running in-kernel tests in QEMU..."
-	@timeout 10 qemu-system-i386 -cdrom $(ISO) -nographic || true
+	@timeout 10 qemu-system-i386 -kernel $(KERNEL) -nographic || true
 
 # Clean build artifacts
 clean: clean-test
