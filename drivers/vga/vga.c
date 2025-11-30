@@ -82,6 +82,8 @@ static int itoa(int32_t value, char* buf, int base) {
         *ptr++ = '-';
     }
 
+    // Save length before null terminator
+    int len = ptr - buf;
     *ptr-- = '\0';
 
     // Reverse string
@@ -91,7 +93,7 @@ static int itoa(int32_t value, char* buf, int base) {
         *ptr1++ = tmp_char;
     }
 
-    return ptr1 - buf;
+    return len;
 }
 
 // Helper: convert 32-bit unsigned integer to string

@@ -30,7 +30,10 @@ make clean
 
 **Phase 1:** ✅ Foundation complete (HAL, per-CPU, IDT, VGA)
 **Phase 2:** ✅ Complete (Timer, PMM, MMU/paging)
-**Phase 3:** 🔨 In progress (Tasks, scheduler - cooperative mode working)
+**Phase 3.1:** ✅ **Preemptive multitasking working!**
+**Phase 3.2:** ✅ **Syscalls complete (INT 0x80)**
+**Phase 3.3:** ✅ **Ring 3 userspace working!**
+**Phase 3.4:** 🔨 Next up (Per-task address spaces)
 
 👉 **See [CURRENT_WORK.md](CURRENT_WORK.md) for today's status and next steps.**
 
@@ -83,33 +86,63 @@ kernel/
 ├── arch/x86/                ← x86-specific code
 │   ├── boot.s               │  Multiboot entry point
 │   ├── hal.c                │  Hardware abstraction layer
-│   ├── idt.c                │  Interrupt handling
-│   ├── idt_asm.s            │  Interrupt stubs
+│   ├── gdt.c                │  GDT and TSS setup
+│   ├── idt.c / idt_asm.s    │  Interrupt handling
+│   ├── timer.c              │  PIT + TSC calibration
+│   ├── mmu.c                │  x86 paging/MMU
+│   ├── context.s            │  Hybrid context switch (kernel/user)
+│   ├── syscall.s            │  INT 0x80 syscall entry
+│   ├── user_test.s          │  Ring 3 test program
 │   └── linker.ld            │  Memory layout
 │
 ├── core/                    ← Architecture-neutral kernel core
 │   ├── init.c               │  Kernel entry and initialization
-│   └── percpu.c             │  Per-CPU data structures
+│   ├── percpu.c             │  Per-CPU data structures
+│   ├── task.c               │  Task management
+│   ├── scheduler.c          │  O(1) priority scheduler
+│   ├── syscall.c            │  Syscall dispatcher and implementations
+│   ├── user.c               │  Userspace task creation
+│   ├── console.c            │  Console multiplexer
+│   └── ktest.c              │  Unit testing framework
 │
 ├── drivers/                 ← Device drivers (modular)
-│   └── vga/                 │  VGA text mode driver
-│       ├── vga.c            │  VGA subsystem
-│       └── vga_text.c       │  Text mode implementation
+│   ├── vga/                 │  VGA text mode driver
+│   │   ├── vga.c            │  VGA subsystem
+│   │   ├── vga_text.c       │  Text mode implementation
+│   │   └── vga_console.c    │  Console backend
+│   └── serial/              │  Serial UART driver
+│       ├── uart.c           │  8250/16550 driver
+│       └── serial_console.c │  Console backend
 │
 ├── lib/                     ← Kernel library functions
 │   └── string.c             │  Safe string operations
 │
-├── mm/                      ← Memory management (Phase 2)
-│   └── (coming soon)
+├── mm/                      ← Memory management
+│   └── pmm.c                │  Physical memory manager
+│
+├── tests/                   ← Unit tests
+│   ├── test_main.c          │  Host test runner
+│   ├── pmm_test.c           │  PMM unit tests
+│   ├── scheduler_test.c     │  Scheduler unit tests
+│   └── kprintf_test.c       │  kprintf unit tests
 │
 ├── include/                 ← Public headers
 │   ├── kernel/              │  Core kernel headers
-│   │   ├── hal.h
-│   │   ├── idt.h
-│   │   ├── percpu.h
-│   │   └── types.h
-│   └── drivers/             │  Driver interfaces
-│       └── vga.h
+│   │   ├── hal.h            │  HAL interface
+│   │   ├── idt.h            │  Interrupt handling
+│   │   ├── percpu.h         │  Per-CPU data
+│   │   ├── task.h           │  Task management
+│   │   ├── scheduler.h      │  Scheduler
+│   │   ├── timer.h          │  Timer subsystem
+│   │   ├── pmm.h            │  Physical memory
+│   │   ├── mmu.h            │  Virtual memory
+│   │   ├── console.h        │  Console multiplexer
+│   │   └── types.h          │  Type definitions
+│   ├── drivers/             │  Driver interfaces
+│   │   ├── vga.h            │  VGA driver
+│   │   └── serial.h         │  Serial driver
+│   └── lib/                 │  Library headers
+│       └── string.h         │  String functions
 │
 └── docs/                    ← Documentation
     ├── DOCS.md              │  Documentation index
@@ -151,8 +184,9 @@ kernel/
 **Tasks & Scheduling:**
 - Task management (create, destroy, yield)
 - O(1) scheduler (256 priority levels)
-- Context switching (< 200 cycles)
-- Cooperative scheduling working
+- Context switching (< 200 cycles, full EFLAGS/segment restore)
+- Timer-driven preemptive multitasking (1000 Hz)
+- Priority-based preemption with round-robin
 
 **Testing & Development:**
 - Unit testing framework (ktest)
@@ -161,9 +195,10 @@ kernel/
 
 ### 🔨 In Progress (Phase 3.2)
 
-- Preemptive scheduling (blocked by interrupt handling issue)
-- Syscall mechanism
-- Userspace tasks
+- Syscall mechanism (INT 0x80 or SYSENTER/SYSEXIT)
+- GDT with ring 3 segments
+- TSS for kernel stack switching
+- First userspace task (ring 3 transition)
 
 ### 📋 Planned
 

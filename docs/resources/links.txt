@@ -1,0 +1,18 @@
+# QEMU and using Golang
+
+https://popovicu.com/posts/making-a-micro-linux-distro/
+
+Apparently QEMU booting directly and skipping GRUB
+qemu-system-riscv64 -machine virt -kernel arch/riscv/boot/Image
+Switching to the UART view, we see that OpenSBI tidily started and the Linux took over! Great! We even see some references to the SBI layer that we have discussed before:
+
+[    0.000000] Linux version 6.5.2 (uros@uros-debian-desktop) (riscv64-linux-gnu-gcc (Debian 10.2.1-6) 10.2.1 20210110, GNU ld (GNU Binutils for Debian) 2.35.2) #1 SMP Mon Sep 11 00:45:40 PDT 2023
+[    0.000000] Machine model: riscv-virtio,qemu
+
+
+# FIL-C
+Fil-C is a fanatically compatible memory-safe implementation of C and C++. Lots of software compiles and runs with Fil-C with zero or minimal changes. All memory safety errors are caught as Fil-C panics. Fil-C achieves this using a combination of concurrent garbage collection and invisible capabilities (each pointer in memory has a corresponding capability, not visible to the C address space). Every fundamental C operation (as seen in LLVM IR) is checked against the capability. Fil-C has no unsafe statement and only limited FFI to unsafe code.
+
+
+
+https://github.com/pizlonator/fil-c

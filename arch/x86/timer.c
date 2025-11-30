@@ -177,8 +177,13 @@ void timer_init(uint32_t frequency_hz) {
 
     // Unmask IRQ 0 in the PIC so timer interrupts can fire
     // By default, all IRQs are masked (0xFF) after pic_remap()
+    uint8_t mask_before = hal->io_inb(0x21);
+    kprintf("[TIMER] PIC mask before: 0x%02x\n", mask_before);
+
     irq_clear_mask(0);
 
+    uint8_t mask_after = hal->io_inb(0x21);
+    kprintf("[TIMER] PIC mask after: 0x%02x\n", mask_after);
     kprintf("[TIMER] Timer initialized successfully (IRQ 0 unmasked)\n");
 }
 
@@ -229,15 +234,9 @@ uint64_t timer_get_tsc_freq(void) {
  * sets scheduler preemption flag.
  *
  * NOTE: We do NOT call schedule() here because we're in interrupt context.
- * Calling schedule() from an interrupt leaves the interrupt frame on the
- * old task's stack without executing IRET, which corrupts the stack and
- * causes triple faults.
- *
- * Instead, scheduler_tick() sets g_scheduler.need_resched, which will be
- * checked at safe yield points (task_yield, syscalls, etc).
- *
- * TODO Phase 4: Add proper preemption by checking need_resched after IRET
- * in a safe kernel entry stub.
+ * We also do NOT send an EOI from here; irq_handler() in idt.c already
+ * sends EOIs for all IRQs. Sending two EOIs on IRQ0 can lead to spurious
+ * interrupts and instability.
  *
  * RT constraint: Must complete in <100 cycles
  */
@@ -246,14 +245,12 @@ void timer_interrupt_handler(void) {
     struct per_cpu_data* cpu = this_cpu();
     cpu->ticks++;
 
+    // Debug: Print every 100 ticks to verify interrupts are firing
+    if (cpu->ticks % 100 == 0) {
+        kprintf("[TIMER] Tick %u\n", (unsigned int)cpu->ticks);
+    }
+
     // Call scheduler tick (updates accounting, sets need_resched flag)
     // This does NOT actually schedule, just sets a flag
     scheduler_tick();
-
-    // Send EOI to PIC (End of Interrupt)
-    // IRQ 0 is on master PIC, so just send to master (port 0x20)
-    hal->io_outb(0x20, 0x20);
-
-    // Return via IRET (do NOT call schedule() here!)
-    // Preemption will happen on next safe yield point
 }

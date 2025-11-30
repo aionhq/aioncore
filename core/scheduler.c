@@ -13,6 +13,7 @@
 #include <kernel/scheduler.h>
 #include <kernel/task.h>
 #include <kernel/hal.h>
+#include <kernel/gdt.h>
 #include <drivers/vga.h>
 #include <lib/string.h>
 
@@ -222,6 +223,14 @@ void schedule(void) {
     task_t* current = g_scheduler.current_task;
     task_t* next = scheduler_pick_next();
 
+    // Debug (disabled - preemptive scheduling verified working)
+    // static int sched_count = 0;
+    // if (sched_count < 20) {
+    //     kprintf("[SCHED] schedule() #%d: %s -> %s\n",
+    //             sched_count, current->name, next->name);
+    //     sched_count++;
+    // }
+
     // If same task, nothing to do
     if (current == next) {
         g_scheduler.need_resched = false;
@@ -253,6 +262,15 @@ void schedule(void) {
     g_scheduler.context_switches++;
     g_scheduler.need_resched = false;
 
+    // Update TSS.esp0 to point to next task's kernel stack top
+    // CRITICAL: Must happen BEFORE context switch
+    // When next task is in ring 3 and makes a syscall (INT 0x80),
+    // CPU will load ESP from TSS.esp0 to switch to kernel stack
+    if (next->kernel_stack && next->kernel_stack_size > 0) {
+        uintptr_t kernel_stack_top = (uintptr_t)next->kernel_stack + next->kernel_stack_size;
+        gdt_set_kernel_stack(kernel_stack_top);
+    }
+
     // Context switch
     context_switch(&current->context, &next->context);
 
@@ -276,13 +294,28 @@ bool scheduler_tick(void) {
         current->cpu_time_ticks++;
     }
 
-    // Simple round-robin within same priority:
-    // If there are other tasks at current priority, set need_resched
+    // Check if we should preempt current task:
+    // 1. Round-robin: other tasks at same priority
+    // 2. Priority preemption: higher-priority tasks ready
     uint8_t priority = current->priority;
+
+    // Check for higher priority tasks
+    uint8_t highest_ready = find_highest_priority();
+    if (highest_ready > priority) {
+        // Higher priority task is ready, preempt immediately
+        g_scheduler.need_resched = true;
+        return true;
+    }
+
+    // Check for other tasks at same priority (round-robin)
     if (g_scheduler.ready[priority].count > 0) {
         g_scheduler.need_resched = true;
         return true;
     }
 
     return false;
+}
+
+bool scheduler_need_resched(void) {
+    return g_scheduler.need_resched;
 }

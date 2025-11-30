@@ -5,10 +5,13 @@
 #include <kernel/percpu.h>
 #include <kernel/types.h>
 #include <kernel/idt.h>
+#include <kernel/gdt.h>
 #include <kernel/pmm.h>
 #include <kernel/mmu.h>
 #include <kernel/task.h>
 #include <kernel/scheduler.h>
+#include <kernel/syscall.h>
+#include <kernel/user.h>
 #include <kernel/console.h>
 #include <drivers/vga.h>
 #include <drivers/serial.h>
@@ -41,6 +44,10 @@ __attribute__((noreturn)) void kmain(uint32_t multiboot_magic, uint32_t multiboo
     console_init();
     console_register(vga_get_console_backend());
     console_register(serial_get_console_backend());
+
+    // Verify GDT was loaded correctly (after console init so output is visible)
+    gdt_verify();
+    kprintf("\n");
 
     // Display welcome banner
     vga_clear();
@@ -81,6 +88,10 @@ __attribute__((noreturn)) void kmain(uint32_t multiboot_magic, uint32_t multiboo
     // Phase 8: Initialize scheduler
     scheduler_init();
 
+    // Phase 9: Initialize syscalls
+    kprintf("\n");
+    syscall_init();
+
 #ifdef KERNEL_TESTS
     // Run kernel self-tests
     extern int ktest_run_all(void);
@@ -115,6 +126,18 @@ __attribute__((noreturn)) void kmain(uint32_t multiboot_magic, uint32_t multiboo
     // Test thread entry point
     extern void test_thread_entry(void* arg);
 
+    // Phase C: Test userspace task (ring 3)
+    kprintf("\n[TEST] === Phase C: Userspace Task (Ring 3) ===\n");
+    kprintf("[TEST] Creating userspace task...\n");
+
+    task_t* user_task = task_create_user("user_test", NULL, 0);
+    if (user_task) {
+        scheduler_enqueue(user_task);
+        kprintf("[TEST] Userspace task created and enqueued\n");
+    } else {
+        kprintf("[TEST] ERROR: Failed to create userspace task\n");
+    }
+
     // Create a test kernel thread
     task_t* test_task = task_create_kernel_thread("test_thread",
                                                     test_thread_entry,
@@ -138,6 +161,7 @@ __attribute__((noreturn)) void kmain(uint32_t multiboot_magic, uint32_t multiboo
     // Enable interrupts for timer-driven preemption/testing
     kprintf("\nEnabling interrupts and yielding to scheduler...\n");
     kprintf("Press Ctrl+A then X to exit QEMU\n\n");
+
     hal->irq_enable();
 
     // Drop into scheduler
@@ -150,26 +174,93 @@ __attribute__((noreturn)) void kmain(uint32_t multiboot_magic, uint32_t multiboo
     }
 }
 
+// Global counter to verify test thread is actually running
+volatile int test_counter = 0;
+
 // Test thread for Phase 3
 void test_thread_entry(void* arg) {
     (void)arg;
 
     kprintf("[TEST] Test thread started!\n");
 
-    // Run for a while, printing periodically
-    for (int i = 0; i < 10; i++) {
-        kprintf("[TEST] Test thread iteration %d\n", i);
+    // Wait for timer ticks to confirm interrupts are working
+    kprintf("[TEST] Waiting for timer interrupts...\n");
+    extern struct per_cpu_data per_cpu[];
+    uint64_t start_ticks = per_cpu[0].ticks;
+    uint64_t timeout = 10000000;  // Safety timeout
+    for (volatile uint64_t i = 0; i < timeout; i++) {
+        if (per_cpu[0].ticks > start_ticks + 10) {
+            kprintf("[TEST] Timer confirmed working (saw %llu ticks)\n\n",
+                    (unsigned long long)(per_cpu[0].ticks - start_ticks));
+            break;
+        }
+    }
+    if (per_cpu[0].ticks <= start_ticks) {
+        kprintf("[TEST] WARNING: No timer ticks detected! Interrupts may be disabled!\n\n");
+    }
 
-        // Yield to other tasks
-        task_yield();
+    // Phase A: Test direct syscall_handler() calls
+    // (Now safe to test yields because timer will preempt idle and bring us back)
+    kprintf("[TEST] === Phase A: Direct syscall_handler() calls ===\n");
 
+    // Test 1: sys_getpid
+    kprintf("[TEST] Testing sys_getpid()...\n");
+    long pid = syscall_handler(SYS_GETPID, 0, 0, 0, 0, 0);
+    kprintf("[TEST] sys_getpid() returned: %ld\n", pid);
+
+    // Test 2: sys_yield
+    kprintf("[TEST] Testing sys_yield()...\n");
+    long ret = syscall_handler(SYS_YIELD, 0, 0, 0, 0, 0);
+    kprintf("[TEST] sys_yield() returned: %ld\n", ret);
+
+    // Test 3: Invalid syscall
+    kprintf("[TEST] Testing invalid syscall (999)...\n");
+    ret = syscall_handler(999, 0, 0, 0, 0, 0);
+    kprintf("[TEST] Invalid syscall returned: %ld (expected -38)\n", ret);
+
+    // Test 4: sys_sleep_us (disabled for now – needs stable sleep queues)
+    // kprintf("[TEST] Testing sys_sleep_us(100000) - 100ms...\n");
+    // ret = syscall_handler(SYS_SLEEP_US, 100000, 0, 0, 0, 0);
+    // kprintf("[TEST] sys_sleep_us() returned: %ld\n", ret);
+
+    kprintf("[TEST] Phase A tests complete!\n\n");
+
+    // Phase B: Test INT 0x80 from kernel mode (ring 0)
+    // Declared in arch/x86/syscall.s (inline asm not allowed in core/ code)
+    extern long syscall_int80(long syscall_num, long arg0, long arg1, long arg2, long arg3, long arg4);
+
+    kprintf("[TEST] === Phase B: INT 0x80 from ring 0 ===\n");
+
+    // Test 1: sys_getpid via INT 0x80
+    kprintf("[TEST] Testing INT 0x80 with SYS_GETPID...\n");
+    long result = syscall_int80(SYS_GETPID, 0, 0, 0, 0, 0);
+    kprintf("[TEST] INT 0x80 SYS_GETPID returned: %ld\n", result);
+
+    // Test 2: sys_yield via INT 0x80
+    kprintf("[TEST] Testing INT 0x80 with SYS_YIELD...\n");
+    result = syscall_int80(SYS_YIELD, 0, 0, 0, 0, 0);
+    kprintf("[TEST] INT 0x80 SYS_YIELD returned: %ld\n", result);
+
+    // Test 3: Invalid syscall via INT 0x80
+    kprintf("[TEST] Testing INT 0x80 with invalid syscall (999)...\n");
+    result = syscall_int80(999, 0, 0, 0, 0, 0);
+    kprintf("[TEST] INT 0x80 invalid syscall returned: %ld (expected -38)\n", result);
+
+    kprintf("[TEST] Phase B tests complete!\n\n");
+
+    // Run for a while, incrementing counter
+    for (int i = 0; i < 5; i++) {
+        test_counter++;
+        kprintf("[TEST] iteration %d, counter=%d\n", i, test_counter);
+
+        // Don't yield manually - let preemption happen
         // Simulate some work
-        for (volatile int j = 0; j < 100000; j++) {
+        for (volatile int j = 0; j < 1000000; j++) {
             // Busy wait
         }
     }
 
-    kprintf("[TEST] Test thread exiting\n");
+    kprintf("[TEST] Test thread exiting (final counter=%d)\n", test_counter);
     task_exit(0);
 }
 

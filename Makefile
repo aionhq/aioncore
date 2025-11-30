@@ -39,15 +39,20 @@ LDFLAGS := -T $(ARCH_DIR)/linker.ld \
 # Source files
 ASM_SOURCES := $(ARCH_DIR)/boot.s \
                $(ARCH_DIR)/idt_asm.s \
-               $(ARCH_DIR)/context.s
+               $(ARCH_DIR)/context.s \
+               $(ARCH_DIR)/syscall.s \
+               $(ARCH_DIR)/user_test.s
 
 C_SOURCES := $(CORE_DIR)/init.c \
              $(CORE_DIR)/percpu.c \
              $(CORE_DIR)/task.c \
              $(CORE_DIR)/scheduler.c \
              $(CORE_DIR)/console.c \
+             $(CORE_DIR)/syscall.c \
+             $(CORE_DIR)/user.c \
              $(ARCH_DIR)/hal.c \
              $(ARCH_DIR)/idt.c \
+             $(ARCH_DIR)/gdt.c \
              $(ARCH_DIR)/timer.c \
              $(ARCH_DIR)/mmu.c \
              $(MM_DIR)/pmm.c \
@@ -84,15 +89,17 @@ help:
 	@echo "                      Shows GUI window + serial output in terminal"
 	@echo "  make run-nographic - Run in QEMU without GUI (serial console only)"
 	@echo "  make run-iso      - Build and run in QEMU (slow - ISO boot via GRUB)"
-	@echo "  make test         - Build with tests and run in QEMU"
+	@echo "  make test         - Run host-side unit tests"
+	@echo "  make test-user    - Test ring 3 userspace (Phase 3.3 regression)"
 	@echo "  make clean        - Clean build artifacts"
 	@echo "  make help         - Show this message"
 	@echo ""
 	@echo "Architecture: x86 (32-bit)"
-	@echo "Modules: HAL, Per-CPU, VGA driver, Timer"
+	@echo "Modules: HAL, Per-CPU, VGA driver, Timer, Syscalls, Userspace"
 	@echo ""
 	@echo "Testing:"
 	@echo "  KERNEL_TESTS=1 make  - Build with unit tests enabled"
+	@echo "  make test-user       - Verify ring 3 syscalls work"
 
 # Compile assembly files
 %.o: %.s
@@ -141,6 +148,15 @@ test-kernel: clean
 	@$(MAKE) KERNEL_TESTS=1 $(KERNEL)
 	@echo "Running in-kernel tests in QEMU..."
 	@timeout 10 qemu-system-i386 -kernel $(KERNEL) -nographic || true
+
+# Test ring 3 userspace functionality (Phase 3.3 regression test)
+test-user: $(KERNEL)
+	@echo "Testing ring 3 userspace task..."
+	@echo "Expected: user_test task exits with code 42"
+	@timeout 5 qemu-system-i386 -kernel $(KERNEL) -nographic 2>&1 | \
+		grep -q "Task 'user_test'.*exiting with code 42" && \
+		echo "✓ Ring 3 test PASSED" || \
+		(echo "✗ Ring 3 test FAILED"; exit 1)
 
 # Clean build artifacts
 clean: clean-test
@@ -191,7 +207,8 @@ HOST_CFLAGS := -std=gnu99 -O0 -g -Wall -Wextra -DHOST_TEST \
 TEST_SOURCES := tests/test_main.c \
                 tests/pmm_test.c \
                 tests/kprintf_test.c \
-                tests/scheduler_test.c
+                tests/scheduler_test.c \
+                tests/gdt_test.c
 
 # Testable kernel code (compiled with HOST_TEST mocks)
 TESTABLE_SOURCES := mm/pmm.c

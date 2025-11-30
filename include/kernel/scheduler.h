@@ -165,9 +165,6 @@ static inline void scheduler_set_need_resched(void) {
  *
  * RT: O(1), < 5 cycles
  */
-static inline bool scheduler_need_resched(void) {
-    extern scheduler_t g_scheduler;
-    return g_scheduler.need_resched;
-}
+bool scheduler_need_resched(void);
 
 #endif // KERNEL_SCHEDULER_H

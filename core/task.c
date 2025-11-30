@@ -20,10 +20,35 @@ static uint32_t next_task_id = 1;
 static task_t* idle_task = NULL;
 
 /**
+ * Allocate a new task structure
+ *
+ * @return  Pointer to allocated task, or NULL on failure
+ */
+task_t* task_alloc(void) {
+    // Allocate task structure from PMM
+    task_t* task = (task_t*)pmm_alloc_page();
+    if (!task) {
+        return NULL;
+    }
+
+    // Zero out structure
+    memset(task, 0, sizeof(task_t));
+
+    // Assign unique task ID
+    task->task_id = next_task_id++;
+
+    return task;
+}
+
+/**
  * Idle thread entry point
  *
  * Runs when no other tasks are ready.
  * Just halts CPU until next interrupt.
+ *
+ * CRITICAL: Must enable interrupts before halting!
+ * schedule() disables interrupts during context switch,
+ * but idle MUST have them enabled to wake up on timer IRQs.
  */
 static void idle_thread_entry(void* arg) {
     (void)arg;
@@ -31,8 +56,12 @@ static void idle_thread_entry(void* arg) {
     kprintf("[TASK] Idle thread started\n");
 
     while (1) {
+        // CRITICAL: Enable interrupts before halting
+        // schedule() might have disabled them during context switch
+        hal->irq_enable();
+
         // Halt CPU until next interrupt
-        // This saves power and lets interrupts wake us up
+        // Timer IRQs will wake us up and scheduler will preempt if needed
         hal->cpu_halt();
     }
 }

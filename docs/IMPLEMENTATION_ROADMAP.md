@@ -43,9 +43,18 @@ Building a real-time microkernel with aggressive userspace offloading.
 - Integrated IDT into HAL (hal->irq_register now works)
 - HAL cpu_init calls idt_init automatically
 
-## Phase 2: Basic Memory & Interrupts (Week 3-4) 🔨 IN PROGRESS
+## Phase 2: Basic Memory & Interrupts (Week 3-4) ✅ COMPLETE
 
 **Goal:** Minimal kernel infrastructure to support tasks and IPC
+
+**Completed (2025-11-30):**
+- ✅ Physical memory manager (bitmap-based, O(1) allocation)
+- ✅ x86 MMU with paging (identity-mapped kernel)
+- ✅ Timer with TSC calibration (1000 Hz, microsecond precision)
+- ✅ Serial UART driver (8250/16550, 115200 baud)
+- ✅ Console multiplexer (VGA + serial dual output)
+- ✅ Direct QEMU kernel boot (5x faster iteration)
+- ✅ Unit testing framework (ktest)
 
 ### 2.1 Physical Memory Manager (Simple Bitmap)
 ```c
@@ -118,9 +127,27 @@ void timer_interrupt_handler(void) {
 
 **Milestone:** Can handle exceptions, timer ticks, map memory for future user tasks
 
-## Phase 3: Tasks, Scheduling & Syscalls (Week 5-6)
+## Phase 3: Tasks, Scheduling & Syscalls (Week 5-6) 🔨 IN PROGRESS
 
 **Goal:** Get to ring3 as fast as possible
+
+### Phase 3.1: Tasks & Preemptive Scheduling ✅ COMPLETE
+
+**Completed (2025-11-30):**
+- ✅ Task structures (TCB with 13-field cpu_context_t)
+- ✅ O(1) scheduler (256 priority levels, bitmap-based)
+- ✅ Context switching (<200 cycles, full EFLAGS/segment restore)
+- ✅ Timer-driven preemptive multitasking (1000 Hz)
+- ✅ Priority-based preemption with round-robin
+- ✅ Multiple concurrent tasks verified working
+
+**Critical fixes:**
+- Fixed context_switch to save/restore ALL 13 fields (was missing EFLAGS + segments)
+- Fixed scheduler_tick to check higher-priority tasks first
+- Added preemption check to irq_handler before returning from interrupt
+- Fixed kprintf %d to print value 0 correctly
+
+### Phase 3.2: Syscalls & Userspace 🔨 NEXT
 
 ### 3.1 Task Structure
 ```c
@@ -668,13 +695,22 @@ After all phases:
 
 ## Current Phase
 
-✅ Phase 1 complete (HAL, per-CPU, modular VGA)
-🔨 Phase 2 in progress (IDT, timer, basic paging)
+- ✅ Phase 1 complete (HAL, per-CPU, modular VGA)
+- ✅ Phase 2 complete (Timer, PMM, MMU, serial, console mux)
+- ✅ Phase 3.1 complete (Tasks, preemptive scheduling)
+- 🔨 Phase 3.2 in progress (Syscalls, GDT/TSS, first userspace task)
 
 ## Next Steps
 
-Start Phase 2 by implementing:
-1. IDT and exception handlers
-2. PIT timer with microsecond precision
-3. Simple bitmap physical memory manager
-4. Basic x86 paging support
+**Immediate (Phase 3.2):**
+1. Design syscall ABI (x86 calling convention)
+2. Set up GDT with ring 3 segments
+3. Create TSS and set ESP0 for kernel stack
+4. Implement INT 0x80 syscall entry mechanism
+5. Add basic syscalls (exit, yield, getpid)
+6. Create first userspace task and transition to ring 3
+
+**Then (Phase 4):**
+- IPC & Capabilities
+- Message passing
+- Capability-based security

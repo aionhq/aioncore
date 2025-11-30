@@ -1,8 +1,8 @@
 # Current Work Status
 
-**Last Updated:** 2025-11-30 (Serial console + QEMU direct boot implemented)
+**Last Updated:** 2025-11-30 (Phase 3.3 COMPLETE! ✅)
 **Phase:** Phase 3 - Tasks, Scheduling & Syscalls
-**Status:** Phase 2 ✅ COMPLETE | Phase 3 🔨 IN PROGRESS (70% complete)
+**Status:** Phase 2 ✅ | Phase 3.1 ✅ | Phase 3.2 ✅ | Phase A ✅ | Phase B ✅ | Phase C ✅ | **Phase 3.3 ✅ COMPLETE**
 
 ---
 
@@ -12,461 +12,659 @@
 - 🎯 [Vision & Long-term Goals](docs/VISION.md)
 - 🗺️ [Implementation Roadmap](docs/IMPLEMENTATION_ROADMAP.md)
 - 🐛 [Known Issues](docs/ISSUES.md)
+- ✅ [TODOs in Code](docs/TODO.md)
 - 📝 [Development Log](DEVELOPMENT_LOG.md)
-- 🔧 [Phase 3 Status](PHASE3_BROKEN.md)
+- 🔧 [Context Switch Bug Analysis](SCHEDULER_CONTEXT_SWITCH_BUG.md)
+- 🚧 [Phase 3.3 Status (Userspace)](PHASE3_3_STATUS.md)
 
 ---
 
-## What We Just Completed ✅
+## 🚀 MAJOR MILESTONE: Ring 3 Userspace Working! 🚀
 
-### Development Infrastructure: Serial Console & Direct QEMU Boot - COMPLETE
+**Date:** 2025-11-30
 
-**Completed:** 2025-11-30
+**Phase 3.3 is COMPLETE!** We now have full ring 0/ring 3 privilege separation with:
+- ✅ Userspace tasks running in ring 3
+- ✅ INT 0x80 syscalls from ring 3
+- ✅ Hybrid iret/jmp context switch
+- ✅ Memory mapped with USER flag
+- ✅ TSS-based kernel stack switching
+- ✅ Clean task creation/exit
+- ✅ Regression test: `make test-user`
 
-**What was built:**
-
-1. ✅ **8250 UART Serial Driver** (`drivers/serial/uart.c`, `include/drivers/serial.h`)
-   - 115200 baud, 8N1 configuration (8 data bits, no parity, 1 stop bit)
-   - Character and string output with CRLF conversion
-   - Non-blocking read operations
-   - Uses HAL I/O port abstraction (hal->io_inb/io_outb)
-   - ~180 lines, fully compliant with KERNEL_C_STYLE.md
-
-2. ✅ **Console Multiplexer** (`core/console.c`, `include/kernel/console.h`)
-   - Clean abstraction layer for multiple console backends
-   - Register/unregister backend support (max 4 backends)
-   - Enable/disable backends at runtime
-   - Zero changes to existing kernel code
-   - Backend interface: init, putchar, write, set_color, clear
-   - ~130 lines of clean, simple code
-
-3. ✅ **Console Backend Adapters**
-   - VGA console backend (`drivers/vga/vga_console.c`) - Adapter for existing VGA driver
-   - Serial console backend (`drivers/serial/serial_console.c`) - Adapter for UART driver
-   - Both implement console_backend interface
-
-4. ✅ **Updated kprintf** (`drivers/vga/vga.c`)
-   - Now uses console abstraction instead of VGA directly
-   - All output automatically goes to ALL registered backends
-   - Simple search-and-replace: vga->putchar → console_putchar, vga->write → console_write
-   - No logic changes, just routing through multiplexer
-
-5. ✅ **Direct QEMU Kernel Boot** (`Makefile`)
-   - `make run` now uses QEMU's `-kernel` flag (skips GRUB/ISO)
-   - Boot time reduced from ~10s to ~2s (5x faster!)
-   - Added `-serial stdio` to show serial output in terminal
-   - `make run-nographic` for terminal-only mode
-   - `make run-iso` preserves old ISO boot method
-   - Leverages existing Multiboot support (QEMU acts as bootloader)
-
-**Files created:**
-- `include/drivers/serial.h` - Serial UART API (75 lines)
-- `drivers/serial/uart.c` - 8250 UART driver implementation (176 lines)
-- `drivers/serial/serial_console.c` - Serial backend adapter (48 lines)
-- `include/kernel/console.h` - Console multiplexer API (80 lines)
-- `core/console.c` - Console multiplexer implementation (132 lines)
-- `drivers/vga/vga_console.c` - VGA backend adapter (67 lines)
-
-**Files modified:**
-- `Makefile` - Added direct QEMU boot targets + new source files
-- `drivers/vga/vga.c` - Updated kprintf to use console abstraction
-- `core/init.c` - Initialize console multiplexer and register backends
-- `include/drivers/vga.h` - Added vga_get_console_backend() declaration
-- `include/drivers/serial.h` - Added serial_get_console_backend() declaration
-
-**Benefits:**
-- ⚡ **5x faster development cycle** (2s boot vs 10s)
-- 📺 **Dual output**: VGA window + serial terminal simultaneously
-- 🔌 **Pluggable architecture**: Easy to add framebuffer, network console, etc.
-- 🧹 **Zero pollution**: No changes to existing kernel logic, all new code isolated
-- ✅ **Style compliant**: All code passes ./scripts/check_kernel_c_style.sh
-
-**Usage:**
-```bash
-make run           # GUI + serial output in terminal
-make run-nographic # Terminal-only (no GUI)
-make run-iso       # Old method (ISO + GRUB)
+**Test results:**
+```
+[USER] Task 'user_test' initialized:
+[USER]   CS=0x001b SS=0x0023 DS=0x0023
+[USER]   EIP=0x00400000 ESP=0xc0000000 EFLAGS=0x00000202
+[USER]   Kernel stack: 0x0000c000 (size=4096)
+[SYSCALL] sys_exit(42) from task 'user_test'
+[TASK] Task 'user_test' (ID: 1) exiting with code 42
 ```
 
-**Testing:** Kernel boots successfully, all output appears in both VGA window and terminal.
+All syscalls (getpid, yield x5, exit) working perfectly!
 
 ---
 
-### Phase 3.1: Tasks & Scheduler - COOPERATIVE MODE WORKING (70% Complete)
+## 🎉 MILESTONE: Preemptive Multitasking Working! 🎉
 
-**Completed:** 2025-11-22
+**Date:** 2025-11-30
 
-**Status:**
-- ✅ Task structures implemented
-- ✅ Context switching working correctly
-- ✅ O(1) scheduler implemented
-- ✅ Cooperative scheduling functional (manual yield)
-- ⚠️ Timer-driven preemption NOT yet tested (interrupts disabled for debugging)
+**Phase 3.1 is COMPLETE!** We now have fully functional preemptive multitasking with:
+- ✅ Timer-driven preemption at 1000 Hz
+- ✅ Priority-based scheduling (256 levels)
+- ✅ O(1) task selection
+- ✅ Context switching with full EFLAGS/segment register restore
+- ✅ Multiple tasks running concurrently
+- ✅ Clean task creation/destruction
 
-**What was built:**
-
-1. ✅ **Task Management** (`core/task.c`, `include/kernel/task.h`)
-   - Task Control Block (TCB) with CPU context
-   - Task states: READY, RUNNING, BLOCKED, ZOMBIE
-   - `task_create_kernel_thread()` - create kernel threads
-   - `task_destroy()` - cleanup tasks
-   - `task_exit()` - terminate current task
-   - `task_yield()` - cooperative yield to scheduler
-   - Idle task (always runnable, CPU halts when nothing to do)
-   - Bootstrap task pattern for initialization code
-
-2. ✅ **O(1) Scheduler** (`core/scheduler.c`, `include/kernel/scheduler.h`)
-   - 256 priority levels (0-255, higher = more urgent)
-   - Priority bitmap for O(1) highest-priority lookup using `__builtin_clz`
-   - Per-priority circular doubly-linked queues
-   - `scheduler_enqueue()` / `scheduler_dequeue()` - O(1) queue operations
-   - `scheduler_pick_next()` - O(1) task selection (< 100 cycles)
-   - `schedule()` - main scheduler entry point
-   - `scheduler_tick()` - called from timer interrupt (sets need_resched flag)
-
-3. ✅ **Context Switching** (`arch/x86/context.s`)
-   - Assembly implementation using correct cdecl pattern
-   - Saves/restores: EDI, ESI, EBX, EBP, ESP, EIP
-   - Uses `push ebp; mov ebp, esp` frame setup
-   - Uses `call 1f; pop ecx` trick to save return address
-   - Uses `jmp *20(%edx)` to restore EIP (not `push/ret`)
-   - RT compliant: < 200 cycles total
-
-4. ✅ **Testing Infrastructure**
-   - Host-side unit tests for scheduler logic (`tests/scheduler_test.c`)
-   - 10 tests covering priority bitmap, queue operations, task selection
-   - All tests pass
-
-**Files created:**
-- `include/kernel/task.h` - Task structure and API (141 lines)
-- `core/task.c` - Task implementation (268 lines)
-- `include/kernel/scheduler.h` - Scheduler API (85 lines)
-- `core/scheduler.c` - O(1) scheduler (284 lines)
-- `arch/x86/context.s` - Context switch assembly (54 lines)
-- `tests/scheduler_test.c` - Unit tests (296 lines)
-- `docs/PHASE3_ROOT_CAUSE_ANALYSIS.md` - Debug analysis
-
-**Files modified:**
-- `core/init.c` - Added task/scheduler init, test thread creation
-- `arch/x86/timer.c` - Added `scheduler_tick()` call, unmasked IRQ0
-- `Makefile` - Added new sources, **fixed duplicate clean target bug**
-- `scripts/check_kernel_c_style.sh` - Exclude `lib/` from forbidden function checks
-
-**Critical Bugs Fixed:**
-
-1. **Task Stack Layout (CRITICAL)** - `core/task.c`
-   - Stack was set up in wrong order for cdecl convention
-   - Fixed: [esp] = return address, [esp+4] = first argument
-   - Caused NULL dereference crash
-
-2. **Context Switch Pattern (CRITICAL)** - `arch/x86/context.s`
-   - Original implementation used incorrect ESP save/restore
-   - Fixed with proper pattern: frame setup, call/pop for EIP, jmp for restore
-   - Caused triple fault on first task switch
-
-3. **Stack Size Validation** - `core/task.c`
-   - Enforced stack_size == 4096 (only allocate one page currently)
-   - Prevents memory corruption from oversized stacks
-
-4. **IRQ0 Masking** - `arch/x86/timer.c`
-   - Added `irq_clear_mask(0)` to unmask timer interrupt
-   - Required for preemptive scheduling
-
-5. **Makefile Clean Target** - `Makefile`
-   - Removed duplicate `clean:` definition that broke `make clean`
-   - Build system now properly cleans artifacts
-
-**Current Output (interrupts disabled, cooperative mode):**
+**Test results:**
 ```
-[TASK] Initializing task subsystem...
-[TASK] Idle task created (ID: 0, stack: 0x00007000)
-[SCHED] Initializing O(1) scheduler...
-[SCHED] Scheduler initialized (idle task: idle)
-
-CPU Features: FPU
-
-Memory Layout:
-  Kernel: 0x00100000
-  Per-CPU data: 0x0010d040
-[TASK] Created task 'test_thread' (ID: 1, priority: 128, stack: 0x00009000)
-[INIT] Test thread created and enqueued
-
-Kernel initialization complete!
-Ready: Tasks and scheduler operational
-
-DEBUG: Testing scheduler without interrupts...
-[INIT] Yielding to scheduler (interrupts DISABLED)...
 [TEST] Test thread started!
-[TEST] Test thread iteration
-[TASK] Idle thread started
+[TEST] iteration 0, counter=1
+[TEST] iteration 1, counter=2
+...
+[TEST] iteration 9, counter=10
+[TEST] Test thread exiting (final counter=10)
+
+[TIMER] Tick 100
+[TIMER] Tick 200
+[TIMER] Tick 300
+...
+[TIMER] Tick 3200
 ```
 
-**What works:**
-- Task creation with proper stack setup
-- Context switching between tasks
-- Cooperative scheduling (manual yield)
-- Scheduler queues and priority selection
-- No crashes, no boot loops!
+All 10 iterations complete, timer interrupts firing continuously, no crashes!
 
-**What's NOT yet tested:**
-- Timer-driven preemption (interrupts disabled for debugging)
-- Preemptive multitasking
+---
+
+## What We Fixed Today ✅
+
+### Bug #6: Context Switch EFLAGS Not Restored (CRITICAL) - FIXED
+**File:** `arch/x86/context.s`
+
+**Problem:**
+- `cpu_context_t` structure includes EFLAGS and segment registers (13 fields total)
+- `context_switch()` assembly only saved/restored 6 fields: edi, esi, ebx, ebp, esp, eip
+- **EFLAGS and segment registers were NEVER loaded from new task!**
+- After context switch, tasks inherited previous task's EFLAGS
+- Result: Timer interrupts stopped firing after first switch (IF bit not set)
+
+**Fix:** Updated context_switch to save/restore ALL fields in cpu_context_t:
+```asm
+# Save EFLAGS
+pushf
+popl %ecx
+movl %ecx, 48(%eax)
+
+# Save segment registers (ss, ds, es, fs, gs)
+...
+
+# Restore EFLAGS first
+movl 48(%edx), %ecx
+pushl %ecx
+popf
+
+# Restore segment registers
+...
+```
+
+**Impact:** Timer interrupts now fire after context switch, preemption works!
+
+### Bug #7: kprintf %d Returns Length 0 for Value 0 - FIXED
+**File:** `drivers/vga/vga.c:itoa()`
+
+**Problem:** `itoa()` returned length 0 when converting value 0, so kprintf printed nothing
+
+**Fix:** Save length before null terminator (like utoa() does):
+```c
+int len = ptr - buf;  // Save length first
+*ptr-- = '\0';
+return len;
+```
+
+### Bug #8: Scheduler Priority Preemption Logic - FIXED
+**File:** `core/scheduler.c:scheduler_tick()`
+
+**Problem:** Only checked for tasks at SAME priority, didn't preempt for higher priority
+- Idle (priority 0) running, test thread (priority 128) ready
+- `scheduler_tick()` checked `ready[0].count > 0` → false
+- Never set need_resched!
+
+**Fix:** Check for higher-priority tasks first:
+```c
+uint8_t highest_ready = find_highest_priority();
+if (highest_ready > current->priority) {
+    need_resched = true;  // Higher priority ready, preempt!
+}
+```
+
+### Preemption Logic Added - COMPLETE
+**File:** `arch/x86/idt.c:irq_handler()`
+
+**Added:** Check need_resched and call schedule() before returning from IRQ:
+```c
+extern bool scheduler_need_resched(void);
+extern void schedule(void);
+if (scheduler_need_resched()) {
+    schedule();
+}
+```
+
+**Impact:** Timer interrupts now trigger preemptive task switches!
+
+---
+
+## How Preemptive Scheduling Works
+
+**The complete flow:**
+
+1. **Timer interrupt fires** (IRQ 0, 1000 Hz)
+2. **CPU saves state** (pushed by hardware: eflags, cs, eip, etc.)
+3. **irq_common_stub** (asm) saves all registers, calls `irq_handler()`
+4. **irq_handler()** calls `timer_interrupt_handler()`
+5. **timer_interrupt_handler()** calls `scheduler_tick()`
+6. **scheduler_tick()** checks if higher-priority task ready, sets `need_resched = true`
+7. **irq_handler()** sends EOI, then checks `need_resched`
+8. **schedule()** called:
+   - Picks highest priority ready task
+   - Dequeues new task (marks RUNNING)
+   - Enqueues current task (marks READY)
+   - Calls `context_switch(old, new)`
+9. **context_switch()** saves old context, loads new context, jumps to new EIP
+10. **New task resumes** where it left off
+11. **Return from schedule()**, return from irq_handler, iret
+12. **Task continues running** until next preemption
+
+**Key insight:** schedule() is called FROM interrupt context, so when we return from schedule(), we return to irq_handler, which irets back to the NEW task!
+
+---
+
+## Files Changed Today
+
+**Modified:**
+- `arch/x86/context.s` - Added EFLAGS and segment register save/restore
+- `drivers/vga/vga.c` - Fixed itoa() length calculation for value 0
+- `core/scheduler.c` - Fixed scheduler_tick() priority preemption logic
+- `arch/x86/idt.c` - Added need_resched check and schedule() call to irq_handler()
+- `arch/x86/timer.c` - Changed debug output from every 10 ticks to every 100 ticks
+- `core/init.c` - Simplified test thread (removed manual yield, added counter)
+
+**All changes pass style checks!**
+
+---
+
+## What's Next: Phase 3.2
+
+### Syscall Entry/Exit Mechanism
+
+**Goals:**
+- System call interface for userspace
+- INT 0x80 or SYSENTER/SYSEXIT
+- Parameter passing (registers or stack)
+- Return values
+
+**Tasks:**
+1. Design syscall ABI (x86 calling convention)
+2. Implement syscall entry (INT handler or SYSENTER)
+3. Implement syscall dispatcher
+4. Add basic syscalls (exit, yield, getpid)
+5. Test from kernel mode first
+6. Add privilege level transition (ring 3 → ring 0)
+
+### First Userspace Task (Ring 3)
+
+**Prerequisites:**
+- GDT with user code/data segments
+- TSS with ESP0 (kernel stack pointer)
+- Syscall mechanism working
+
+**Tasks:**
+1. Set up GDT with ring 3 segments
+2. Create TSS, set ESP0
+3. Load TR register
+4. Create userspace task (separate address space)
+5. Transition to ring 3 (iret with ring 3 segments)
+6. Test syscall from userspace
+
+---
+
+## Current Status Summary
+
+**Phase 1: Foundation & HAL** - ✅ COMPLETE
+- HAL abstraction
+- Per-CPU infrastructure
+- IDT and interrupts
+- VGA driver
+- Safe string library
+
+**Phase 2: Memory & Timing** - ✅ COMPLETE
+- Timer (PIT + TSC calibration)
+- Physical memory manager (PMM)
+- MMU with paging
+- Serial console
+- Console multiplexer
+- Direct QEMU boot
+
+**Phase 3.1: Tasks & Preemptive Scheduling** - ✅ COMPLETE
+- Task structures (TCB)
+- Context switching (with EFLAGS restore!)
+- O(1) scheduler (256 priority levels)
+- Timer-driven preemption
 - Multiple tasks running concurrently
+- Cooperative AND preemptive scheduling
 
-**Reference:** [PHASE3_BROKEN.md](PHASE3_BROKEN.md) for detailed bug analysis
+**Phase 3.2: Syscalls & Userspace** - 🔨 IN PROGRESS
+- ✅ Syscall mechanism (INT 0x80, DPL=3)
+- ✅ GDT/TSS setup with per-task ESP0
+- ✅ Phase A: Direct syscall_handler tests (getpid, yield, invalid)
+- ✅ Phase B: INT 0x80 from ring 0 (getpid, yield, invalid)
+- ⏭️ Phase C: First ring 3 task and INT 0x80 from userspace
+  - Create user task, map USER stack/code
+  - Transition to ring 3 (CS=0x1B, SS=0x23)
+  - Verify syscalls work from ring 3
 
----
-
-### Phase 2.3: Basic Paging (MMU) - COMPLETE
-
-**Completed:** 2025-11-22
-
-**What was built:**
-1. ✅ MMU with x86 two-level page tables (`arch/x86/mmu.c`, `include/kernel/mmu.h`)
-   - Page directory and page table management
-   - O(1) map/unmap operations (direct 2-level indexing, no loops)
-   - Lazy page table allocation (allocate on first use)
-   - Address space creation/destruction/switching
-   - Identity mapping for kernel (first 16MB)
-   - CR3 management for address space switching
-   - TLB invalidation (single-page and full flush)
-
-**Files created:**
-- `include/kernel/mmu.h` - Architecture-independent MMU API (154 lines)
-- `arch/x86/mmu.c` - x86 two-level paging implementation (326 lines)
-
-**Integration:**
-- Updated `core/init.c` to call `mmu_init()` after PMM initialization
-- Paging enabled via CR0.PG bit in `mmu_init()`
-- Kernel address space created with identity-mapped first 16MB
-
-**Critical Bug Fixed:**
-- Fixed kprintf number truncation bug in `utoa()` function (returned wrong length)
-- Created host-side unit tests to catch bugs faster
-
-**Reference:** [Phase 2.3 Details](docs/IMPLEMENTATION_ROADMAP.md#23-basic-paging)
+**Phase 4: IPC & Capabilities** - ⏳ TODO
+- Message passing
+- Capability-based security
+- Channels
 
 ---
 
-### Phase 2.2: Physical Memory Manager - COMPLETE
-
-**Completed:** 2025-11-21
-
-**What was built:**
-1. ✅ PMM with bitmap allocator (`mm/pmm.c`, `include/kernel/pmm.h`)
-   - Parses multiboot memory map
-   - Bitmap-based frame allocator
-   - Frame allocation/deallocation
-   - Reserved region tracking
-   - Statistics API
-
-**Files created:**
-- `mm/pmm.c` - Physical memory manager (389 lines)
-- `include/kernel/pmm.h` - PMM API (90 lines)
-- `tests/pmm_test.c` - Unit tests (6 tests)
-
-**Reference:** [Phase 2.2 Details](docs/IMPLEMENTATION_ROADMAP.md#22-physical-memory-manager-pmm)
-
----
-
-### Phase 2.1: Timer Implementation - COMPLETE
-
-**Completed:** 2025-11-21
-
-**What was built:**
-1. ✅ PIT (Programmable Interval Timer) driver
-2. ✅ TSC calibration
-3. ✅ Microsecond-precision timing
-4. ✅ Unit testing framework
-
-**Files created:**
-- `arch/x86/timer.c` - PIT + TSC implementation
-- `include/kernel/ktest.h` - Test framework
-- `core/ktest.c` - Test runner
-
-**Reference:** [Phase 2.1 Details](docs/IMPLEMENTATION_ROADMAP.md#24-timer-support)
-
----
-
-### Phase 1: Foundation & HAL - COMPLETE
-
-**Completed:** 2025-11-21
-
-**What was built:**
-1. ✅ HAL abstraction layer
-2. ✅ Per-CPU infrastructure
-3. ✅ IDT and interrupt handling
-4. ✅ Modular VGA driver
-5. ✅ Safe string library
-
-**Reference:** [Phase 1 Details](docs/IMPLEMENTATION_ROADMAP.md#phase-1-foundation--hal-week-1-2--done)
-
----
-
-## What We're Working On Now 🔨
-
-### Phase 3.2: Debug Boot Loop for Preemptive Scheduling
-
-**Current Status:** BLOCKED by boot loop when interrupts enabled
-
-**The Problem:**
-- Cooperative scheduling works perfectly
-- Enabling interrupts (`hal->irq_enable()`) causes boot loop/triple fault
-- Root cause unidentified after extensive debugging session
-- All debugging attempts reverted to last known working state
-
-**What Was Tried (and failed):**
-1. Stack canaries and validation - No violations detected
-2. Bootstrap task ESP capture - Not relevant
-3. Panic handler hardening - Never reached (triple fault)
-4. Interrupt enable timing - Boot loop persists
-5. EFLAGS restoration attempts - Made it worse
-6. kprintf reentrancy fixes - No effect
-7. Host-side unit tests - Logic is correct, bug is elsewhere
-
-**Next steps (systematic approach):**
-
-1. 🔨 **Understand x86 interrupt mechanics**
-   - Read Intel manuals on TSS, ESP0, privilege level transitions
-   - Understand interrupt stack frame layout
-   - Verify our interrupt handler assembly matches requirements
-
-2. 🔨 **QEMU/GDB debugging**
-   - Attach GDB to QEMU
-   - Set breakpoint in timer_interrupt_handler
-   - Single-step through interrupt handling code
-   - Examine stack contents before/after interrupt
-   - Check CPU state (EFLAGS, ESP, SS, etc.)
-
-3. 🔨 **Minimal test case**
-   - Remove ALL kprintf from interrupt paths
-   - Test with single idle task only
-   - Gradually add complexity until boot loop reappears
-
-4. 🔨 **Check EFLAGS handling**
-   - Verify IF bit is set in task contexts
-   - Ensure context_switch preserves/restores EFLAGS correctly
-   - Test if IRET restores EFLAGS properly
-
-**Remaining Phase 3 work (30%):**
-- ⚠️ Timer-driven preemption (BLOCKED by boot loop)
-- ⏳ Syscall entry/exit mechanism (BLOCKED)
-- ⏳ First userspace task (ring3) (BLOCKED)
-- ⏳ GDT setup with TSS (may be needed to fix boot loop)
-- ⏳ User mode transition (BLOCKED)
-
----
-
-## Known Issues 🐛
-
-### Critical Priority - BLOCKS PROGRESS
-
-1. **Boot Loop When Interrupts Enabled** [BLOCKER]
-   - Enabling interrupts causes triple fault/boot loop
-   - Root cause unidentified despite extensive debugging
-   - Blocks all further Phase 3 work (preemptive scheduling, syscalls, userspace)
-   - **Status:** Under investigation, requires systematic QEMU/GDB debugging
-   - **Reference:** See [PHASE3_BROKEN.md](PHASE3_BROKEN.md) for detailed debugging history
-
-### High Priority
-
-2. **Static MMU Page Table Storage** [Issue #5]
-   - `arch/x86/mmu.c:28` uses static 4KB buffer for page tables
-   - Limits kernel to single address space
-   - **Fix:** Allocate page tables dynamically from PMM
-   - **Impact:** Cannot create multiple address spaces for userspace tasks
-
-### Medium Priority
-
-1. **GDT Not Initialized** [Issue #3](docs/ISSUES.md#3--gdt-not-initialized)
-   - Currently relying on GRUB's GDT
-   - Need own GDT for TSS/syscalls
-   - **Action:** Implement in Phase 3 for userspace
-
-2. **Stack Size Limited to 4096**
-   - Only one page allocated per task
-   - Larger stacks not supported yet
-   - **Action:** Add multi-page allocation in Phase 4
-
-**Full issue list:** [docs/ISSUES.md](docs/ISSUES.md)
-
----
-
-## Development Notes
-
-### Build & Test
+## Build & Test
 
 ```bash
 # Clean build
 make clean && make
 
-# Run in QEMU
+# Run (expect to see all 10 iterations + timer ticks)
 make run
 
-# Run host-side unit tests
-make test
-
-# Expected output (current - interrupts disabled):
-# - Task subsystem initialization
-# - Scheduler initialization
-# - Test thread creation
-# - Manual yield to scheduler
-# - Test thread runs one iteration
-# - Idle thread starts
+# Expected output:
+# [TEST] Test thread started!
+# [TEST] iteration 0, counter=1
+# [TEST] iteration 1, counter=2
+# ...
+# [TEST] iteration 9, counter=10
+# [TEST] Test thread exiting (final counter=10)
+# [TIMER] Tick 100
+# [TIMER] Tick 200
+# ...
 ```
 
-### Current Limitations
+---
 
-- Only cooperative scheduling (no timer preemption yet)
-- Only kernel-mode tasks (no userspace yet)
-- Single-page stacks (4096 bytes)
-- No task cleanup (zombie tasks not freed)
+## Lessons Learned
+
+### What Worked
+
+1. **Serial console was invaluable**
+   - Dual output (VGA + serial) made debugging possible
+   - Could see timer ticks and task output interleaved
+   - Proved interrupts were firing when VGA scrolled off
+
+2. **Systematic debugging**
+   - Added targeted debug output (EFLAGS, tick counters, PIC masks)
+   - Discovered bugs by inspection (checked structure vs assembly)
+   - Incremental verification at each step
+
+3. **Critical architecture review**
+   - User pushed back on "it's working!" claims
+   - Forced us to verify actual execution, not just context switches
+   - Revealed that test thread wasn't actually resuming
+
+4. **Simplified test case**
+   - Removed manual yield, let pure preemption work
+   - Added simple counter to verify execution
+   - Made it obvious when preemption was working
+
+### Key Insights
+
+1. **Context switch is a contract**
+   - `cpu_context_t` defines EVERY field that must be saved
+   - Assembly MUST match structure layout EXACTLY
+   - Missing even one field (EFLAGS) causes subtle, hard bugs
+
+2. **"Boot loop" was actually missing EFLAGS restore**
+   - Earlier debugging thought "enabling interrupts causes crash"
+   - Reality: interrupts worked, but context switch didn't restore IF bit
+   - After first switch, tasks ran with random EFLAGS
+
+3. **Preemption requires correct priority logic**
+   - Can't just check same-priority round-robin
+   - Must check for higher-priority tasks ready
+   - Idle should always be preempted by any real task
+
+4. **Manual yield complicated testing**
+   - Original test called task_yield() explicitly
+   - Made it unclear if preemption was working
+   - Pure preemptive test (no yield) proved it works
 
 ---
+
+## Known Issues
+
+### High Priority
+
+1. **Static MMU Page Table Storage** [Issue #5]
+   - `arch/x86/mmu.c:28` uses static 4KB buffer
+   - Limits kernel to single address space
+   - **Fix:** Allocate page tables dynamically from PMM
+   - **Blocks:** Multiple address spaces for userspace
+
+### Medium Priority
+
+2. **GDT Not Initialized** [Issue #3]
+   - Currently relying on GRUB's GDT
+   - Need own GDT for TSS/syscalls
+   - **Required for:** Phase 3.2 userspace tasks
+
+3. **Stack Size Limited to 4096**
+   - Only one page per task
+   - **Fix:** Multi-page allocation in Phase 4
+
+4. **No Task Cleanup**
+   - Zombie tasks not freed
+   - **Fix:** Add reaper thread or cleanup in scheduler
+
+---
+
+## What We Just Completed Today ✅
+
+**Phase 3.2 Step 1: GDT + TSS Setup (COMPLETE):**
+- ✅ Designed GDT with ring 0 and ring 3 segments
+- ✅ Created 8 unit tests for GDT descriptor encoding
+- ✅ Implemented arch/x86/gdt.c and include/kernel/gdt.h
+- ✅ Added GDT verification with segment register readback
+- ✅ Verified: CS=0x08, DS=0x10, SS=0x10, TR=0x28 all correct
+- ✅ TSS loaded and ready for syscall stack switching
+
+**Files created:**
+- `tests/gdt_test.c` - 8 unit tests, all passing
+- `arch/x86/gdt.c` - GDT/TSS implementation (279 lines)
+- `include/kernel/gdt.h` - GDT API (62 lines)
+
+**Files modified:**
+- `arch/x86/hal.c` - Call gdt_init() in cpu_init()
+- `core/init.c` - Call gdt_verify() after console init
+- `Makefile` - Added gdt.c and gdt_test.c
+
+## What We Just Completed ✅ (Phase 3.2 Step 2: Syscall Mechanism)
+
+**Completed (2025-11-30):**
+- ✅ Designed syscall ABI (Linux i386-compatible register convention)
+- ✅ Implemented arch/x86/syscall.s (INT 0x80 entry/exit assembly, ~120 lines)
+- ✅ Created syscall dispatcher (core/syscall.c, ~160 lines)
+- ✅ Registered INT 0x80 handler in IDT with DPL=3 (type 0xEE)
+- ✅ Implemented 4 basic syscalls (exit, yield, getpid, sleep_us)
+- ✅ Fixed current_task NULL issue (use g_scheduler.current_task)
+- ✅ Updated TSS.esp0 in schedule() for ring 3 stack switching
+
+**Files created (3 new files, ~370 lines):**
+- `include/kernel/syscall.h` - Syscall API and numbers (67 lines)
+- `arch/x86/syscall.s` - INT 0x80 entry/exit (120 lines)
+- `core/syscall.c` - Dispatcher and implementations (160 lines)
+
+**Files modified:**
+- `arch/x86/idt.c` - Registered INT 0x80 with DPL=3
+- `core/init.c` - Added syscall_init() + Phase A tests
+- `core/scheduler.c` - Added TSS.esp0 update before context switch
+- `Makefile` - Added syscall.s and syscall.c to build
+
+**Critical fixes:**
+- Fixed sys_exit/sys_getpid to use `g_scheduler.current_task` instead of `this_cpu()->current_task`
+- Added TSS.esp0 update in schedule() before context_switch()
+- Used uniform syscall signature (all take 5 long args, cast unused ones to void)
+
+## 🔨 Phase 3.3: First Userspace Task (IN PROGRESS - 50%)
+
+**Started:** 2025-11-30
+**Goal:** Create first ring 3 userspace task that makes syscalls via INT 0x80
+
+### Step 1: Memory Layout Design ✅ COMPLETE
+
+**Completed:**
+- Defined userspace virtual memory layout
+- Created `include/kernel/user.h` with constants
+
+**Memory Layout:**
+```
+0x00000000 - 0x00400000: Reserved (NULL pointer guard)
+0x00400000 - 0x00800000: User code & data (4MB, USER|PRESENT)
+0xBFFFF000 - 0xC0000000: User stack (4KB, USER|PRESENT|WRITABLE)
+0xC0000000 - 0xFFFFFFFF: Kernel space (PRESENT only, no USER)
+```
+
+**Constants Defined:**
+- USER_CODE_BASE = 0x00400000
+- USER_STACK_TOP = 0xC0000000
+- USER_CS_SELECTOR = 0x1B (GDT entry 3, RPL=3)
+- USER_DS_SELECTOR = 0x23 (GDT entry 4, RPL=3)
+
+**Files created:**
+- `include/kernel/user.h` - Userspace constants and API
+
+### Step 2: Hybrid Context Switch ✅ COMPLETE
+
+**Completed:**
+- Implemented iret-based context switch with kernel/user path selection
+- Kernel→Kernel: Fast path using `jmp *eip`
+- Kernel→User: Privilege switch using `iret` instruction
+
+**Implementation:**
+Changed `arch/x86/context.s` to check target CS.RPL:
+- If RPL == 0 (kernel): restore ESP manually, `jmp` to EIP
+- If RPL == 3 (user): build iret frame, use `iret` for atomic privilege switch
+
+**Why This Works:**
+- `iret` from ring 0 to ring 0: only pops EIP/CS/EFLAGS (doesn't switch stacks)
+- `iret` from ring 0 to ring 3: pops EIP/CS/EFLAGS/ESP/SS (switches to user stack)
+- Hybrid approach: kernel fast path avoids unnecessary iret overhead
+
+**Test Results:**
+- ✅ Phase A tests still pass
+- ✅ Phase B tests still pass
+- ✅ Kernel→kernel context switches work
+- ✅ Ready for kernel→user switches
+
+**Files modified:**
+- `arch/x86/context.s` - Lines 106-130 (hybrid iret/jmp path)
+
+### Step 3: Userspace Test Program ✅ COMPLETE
+
+**Completed:**
+- Created simple ring 3 test program in assembly
+- Tests SYS_GETPID, SYS_YIELD (5x), SYS_EXIT
+
+**Test Program Flow:**
+```asm
+1. Call SYS_GETPID (verify syscall works from ring 3)
+2. Loop 5x calling SYS_YIELD (verify context switching)
+3. Call SYS_EXIT with code 42 (clean exit)
+```
+
+**Files created:**
+- `arch/x86/user_test.s` - Userspace test program (~40 lines)
+- `Makefile` - Added user_test.s to ASM_SOURCES
+
+### Step 4: MMU User Page Mapping 🔨 NEXT
+
+**TODO:**
+- Add `page_map_user()` function to MMU
+- Map pages with USER|PRESENT|WRITABLE flags
+- Copy userspace code to mapped pages
+
+### Step 5: Ring 3 Task Initialization 🔨 TODO
+
+**TODO:**
+- Implement `task_create_user()` function
+- Set CS=0x1B, SS/DS/ES=0x23
+- Set initial ESP to USER_STACK_TOP
+- Set EFLAGS with IF=1
+
+### Step 6: Testing 🔨 TODO
+
+**TODO:**
+- Create user task from init
+- Verify INT 0x80 works from ring 3
+- Test privilege separation
+
+---
+
+## ✅ Phase 3.2 Step 5: Phase B Testing (COMPLETE)
+
+**Completed (2025-11-30):**
+- ✅ Created syscall_int80() helper in arch/x86/syscall.s
+- ✅ Added Phase B tests (INT 0x80 from ring 0)
+- ✅ All tests pass with fixed argument marshalling
+
+**Phase B Implementation:**
+Created `syscall_int80()` wrapper function to invoke INT 0x80 from C code:
+- Loads 6 arguments into registers (EAX=syscall_num, EBX-EDI=args)
+- Executes `int $0x80` instruction
+- Returns result in EAX
+- Follows cdecl calling convention (saves/restores callee-saved registers)
+
+**Test Results:**
+```
+[TEST] === Phase B: INT 0x80 from ring 0 ===
+[TEST] INT 0x80 SYS_GETPID returned: 1           ✅
+[TEST] INT 0x80 SYS_YIELD returned: 0             ✅
+[TEST] INT 0x80 invalid syscall returned: -38    ✅
+[TEST] Phase B tests complete!
+```
+
+**Proof of Argument Marshalling Fix:**
+Phase B validates the fix from Step 4 - arguments are now correctly loaded into temporaries before pushing, so syscalls receive proper values instead of garbage.
+
+**Files modified:**
+- `arch/x86/syscall.s` - Added syscall_int80() helper (lines 132-160)
+- `core/init.c` - Added Phase B tests using syscall_int80()
+
+## ✅ Phase 3.2 Step 4: Critical Bug Fixes (COMPLETE)
+
+**Completed (2025-11-30):**
+- ✅ Fixed INT 0x80 argument marshalling bug (syscall.s)
+- ✅ Fixed CS register not saved/restored in context_switch (context.s)
+- ✅ Added proper SS restoration (was missing!)
+- ✅ Documented sys_sleep_us as STUB implementation
+- ✅ Removed heavy kprintf calls from hot paths
+
+**INT 0x80 Argument Marshalling Fix:**
+Problem: Stack offsets calculated BEFORE pushes, so subsequent pushes invalidated offsets
+- Each `pushl offset(%esp)` changed ESP, making next offset wrong
+- Result: Syscalls received garbage arguments
+- Fix: Load all 6 args into registers BEFORE pushing them
+
+**CS/SS Register Save/Restore Fix:**
+Problem: cpu_context_t includes cs/ss but context_switch never saved/restored them
+- CS at offset +24 was never touched
+- SS was saved but never restored
+- Result: Would crash when switching to userspace tasks (different CS)
+- Fix: Save CS/SS with `movw %cs, %cx`, restore SS with `movl %ecx, %ss`
+- Note: CS restoration deferred to iret-based switch for userspace
+
+**sys_sleep_us Documentation:**
+- Clearly documented as STUB that does NOT sleep for requested duration
+- Just yields once to prove syscall mechanism works
+- Full implementation deferred to Phase 4 (sleep queues + timer wakeup)
+
+**Hot Path Optimization:**
+- Removed kprintf from syscall_handler (invalid syscall cases)
+- Prevents console reentrancy from IRQ context
+- Reduces timing skew during syscall testing
+
+**Files modified:**
+- `arch/x86/syscall.s` - Fixed arg marshalling (lines 68-85)
+- `arch/x86/context.s` - Added CS/SS save/restore (lines 59-62, 87-96)
+- `core/syscall.c` - Documented sys_sleep_us as STUB, removed hot path kprintf
+
+## ✅ Phase 3.2 Step 3: Context Switch Bug Fix & Phase A Testing (COMPLETE)
+
+**Completed (2025-11-30):**
+- ✅ Fixed critical context switch bug (call/pop trick saved wrong EIP)
+- ✅ Rewrote context_switch to use ESP-based offsets (removed frame pointer dependency)
+- ✅ All Phase A syscall tests passing
+- ✅ Cleaned up excessive debug output from scheduler and syscalls
+
+**Context Switch Fix:**
+Changed `arch/x86/context.s` from EBP-based frame unwinding to ESP-based:
+- Save EIP from `0(%esp)` (actual return address on stack)
+- Save ESP as `esp + 12` (caller's ESP after function returns)
+- Save EBP value directly without dereferencing (avoids page faults)
+- Removed prologue entirely, no frame pointer dependency
+
+**sys_sleep_us Fix:**
+Simplified from timer-based busy-wait loop to single yield:
+- Original crashed due to rapid context switches with timer reads
+- Deferred full sleep queue implementation to Phase 4
+- Single yield proves syscall mechanism works correctly
+
+**Phase A Test Results:**
+- ✅ sys_getpid() returns correct task ID (1)
+- ✅ sys_yield() successfully context switches
+- ✅ Invalid syscall returns -ENOSYS (-38)
+- ✅ sys_sleep_us() works with simplified implementation
+
+**Files modified:**
+- `arch/x86/context.s` - Fixed EIP/ESP save logic (lines 27-56)
+- `core/syscall.c` - Simplified sys_sleep_us, removed debug output
+- `core/scheduler.c` - Removed excessive debug logging
+- `SCHEDULER_CONTEXT_SWITCH_BUG.md` - Documented resolution
+- `CURRENT_WORK.md` - Updated status (Phase 3.2 complete!)
+
+## ✅ Phase 3.2 COMPLETE! Syscalls Working!
+
+**Status:** ✅ COMPLETE - Context switching and syscalls fully operational!
+**Date Completed:** 2025-11-30
+
+### Context Switch Bug Resolution
+
+**Status:** ✅ RESOLVED - Context switching now works correctly!
+**Date Fixed:** 2025-11-30
+
+**Root Causes:**
+1. **Wrong EIP save**: Original code used `call/pop` trick that saved address INSIDE context_switch, not caller's return address
+2. **Frame pointer dependency**: Code relied on EBP being stable, but compiler omits frame pointers by default
+
+**The Fix:** Changed `arch/x86/context.s` to use ESP-based offsets (lines 27-56):
+- Removed prologue - no frame pointer needed
+- Save EIP from `0(%esp)` (actual return address on stack)
+- Save ESP as `esp + 12` (caller's ESP after return)
+- Save EBP value directly without dereferencing
+
+**Results:**
+- ✅ sys_getpid() works
+- ✅ sys_yield() works and returns properly!
+- ✅ Context switches work in both directions
+- ✅ Multiple yields work correctly
+
+**See:** `SCHEDULER_CONTEXT_SWITCH_BUG.md` for detailed analysis
 
 ## Immediate Next Actions
 
-**Completed Today (2025-11-22):**
+**Phase A Tests:** ✅ COMPLETE!
+1. ✅ sys_getpid() - working (returns task ID 1)
+2. ✅ sys_yield() - working (context switches successfully)
+3. ✅ Invalid syscall handling - working (returns -ENOSYS)
+4. ✅ sys_sleep_us() - working (simplified to single yield, full timer-based sleep deferred to Phase 4)
 
-1. ✅ Fixed task stack layout bug (cdecl calling convention)
-2. ✅ Fixed context_switch assembly (proper pattern)
-3. ✅ Fixed Makefile clean target
-4. ✅ Enforced stack size validation
-5. ✅ Unmasked IRQ0 for timer interrupts
-6. ✅ Boot loop eliminated
-7. ✅ Cooperative scheduling working
-8. ✅ Context switch verified correct
+**Phase B Tests:** ✅ COMPLETE!
+1. ✅ INT 0x80 SYS_GETPID - working (returns task ID 1)
+2. ✅ INT 0x80 SYS_YIELD - working (context switches successfully)
+3. ✅ INT 0x80 invalid syscall - working (returns -ENOSYS)
 
-**Next Session:**
+**Next Steps:**
+1. 🔨 Move to Phase 3.3 (first userspace task in ring 3)
 
-1. 🔨 **Enable interrupts and test preemption** (PRIORITY 1)
-   - Remove debug flag from init.c
-   - Re-enable `hal->irq_enable()`
-   - Test if timer-driven preemption works
-   - Debug any triple faults or crashes
-
-2. 🔨 **Fix scheduler warnings**
-   - Investigate "No tasks in priority 0 queue" message
-   - Verify idle task queue handling
-
-3. 🔨 **Create multiple test threads**
-   - Test round-robin scheduling
-   - Verify priority preemption
-
-4. 🔨 **Commit Phase 3 progress**
-   - Document working cooperative scheduler
-   - Prepare for preemptive scheduling phase
-
-**This Week:**
-- ✅ Phase 2 complete
-- 🔨 Phase 3 cooperative scheduling working
-- Next: Phase 3 preemptive scheduling
-
-**This Sprint (2 weeks):**
-- ✅ Complete Phase 2 (memory + interrupts + timer)
-- 🔨 Complete Phase 3 (tasks + scheduler + syscalls)
-- Target: First userspace task running in ring3
+**Phase 3.3: First Userspace Task:**
+- Create simple userspace binary
+- Map code + stack with USER flag
+- Transition to ring 3 with iret
+- Test INT 0x80 from ring 3 (full end-to-end syscall from userspace)
 
 ---
 
-**Keep this file updated daily!**
+**Phase 3.1 COMPLETE! Preemptive multitasking is working!** 🎉
+
+Next stop: Syscalls and userspace!

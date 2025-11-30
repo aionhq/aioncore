@@ -1,361 +1,86 @@
 # Multi-Architecture Support Plan
 
-## Philosophy
+This file consolidates the multi-arch strategy and porting playbook. The core is kept architecture-neutral; all arch-specific code lives in `arch/<arch>/`.
 
-**Validate on x86, then expand.** The HAL abstraction is designed for multiple architectures from day one, but we'll prove the design works on x86 before adding complexity.
+## Philosophy
+- Validate on x86 first, then expand.
+- Keep the HAL surface stable; no arch-specific code in `core/`, `drivers/`, `lib/`, or `mm/`.
+- Width-agnostic types in shared code (`uintptr_t`, `size_t`, `phys_addr_t`); no inline asm outside `arch/`.
 
 ## Current Architecture Support
+- ✅ x86 (32-bit) – primary development target
+- 📋 x86_64 – planned long-mode port
+- 📋 RISC-V – planned second architecture
+- 📋 ARM – future consideration
+
+## Repository Layout & Build Selection
+- `arch/x86/`      – 32-bit x86
+- `arch/x86_64/`   – long mode (planned)
+- `arch/riscv/`    – RISC-V (planned)
+- Makefile: add `ARCH ?= x86` to select toolchain, linker script, and arch sources.
+- Per-arch run targets (e.g., `make run ARCH=x86_64`) recommended.
+
+## HAL Abstraction Layer (Stable Surface)
+All architecture-specific code is isolated behind `struct hal_ops` (see `include/kernel/hal.h`). Invariants:
+- All hardware access through HAL.
+- No dynamic allocation in interrupt/syscall hot paths.
+- `cpu_context_t` layout documented and matched by arch asm.
+- Segment selectors/CSRs set for user entry (DPL=3 or U-mode) before running userspace.
+
+## Architecture-Neutral vs Specific Code
+- **Neutral:** scheduler, IPC/capabilities, per-CPU data, string/lib helpers, drivers (via HAL), core init.
+- **Specific (per `arch/<arch>/`):**
+  - Boot code + linker script
+  - HAL implementation
+  - Interrupt/trap stubs and handlers
+  - Paging (page tables, TLB management)
+  - Context switch asm
+  - Syscall entry/exit path
+  - Atomics if needed beyond builtins
+
+## Porting Playbook (per arch)
+1. **Boot to `kmain`**
+   - Minimal bootstrap, stacks, mode switch (protected/long/S-mode).
+   - Install GDT/TSS (x86/x86_64) or trap vector (RISC-V).
+   - Print via minimal console (serial or VGA/fb).
+2. **Paging**
+   - Implement arch-native tables (x86_64: PML4/PDPT/PD/PT; RISC-V: Sv39/Sv48).
+   - Identity map kernel code/data/stack; map kernel virtual base if used.
+   - Implement `mmu_map/unmap/switch` under arch.
+3. **Interrupts + Context Switch**
+   - Stubs/trap handlers for arch frame layout.
+   - Context switch asm matching `cpu_context_t`.
+   - Wire HAL IRQ enable/disable/register.
+4. **Syscall Entry/Exit**
+   - x86: INT 0x80 gate DPL=3 (interrupt gate 0xEE).
+   - x86_64: SYSCALL/SYSRET; document clobbers (RCX/R11) and arg order (RDI, RSI, RDX, R10, R8, R9; RAX return).
+   - RISC-V: ECALL from U-mode; a7=syscall#, a0–a5 args; a0 return.
+   - Install gate/trap with user privilege; ensure per-task kernel stack (TSS.esp0 or equivalent) is set.
+5. **Testing**
+   - Host tests remain arch-neutral.
+   - Per-arch QEMU smoke: boot banner, timer tick, simple task switch.
+   - Syscall smoke: direct handler call, then real entry path.
+
+## Syscall ABI Snapshot
+- **x86 (32-bit, INT 0x80):** EAX=syscall#, EBX/ECX/EDX/ESI/EDI args; EAX return; IF cleared by gate 0xEE (DPL=3).
+- **x86_64 (planned):** SYSCALL/SYSRET; RAX=syscall#, RDI/RSI/RDX/R10/R8/R9 args; RAX return; RCX/R11 clobbered by SYSCALL; per-task kernel stack via TSS.esp0.
+- **RISC-V (planned):** ECALL from U-mode; a7=syscall#, a0–a5 args; a0 return; save/restore S-mode CSRs as needed.
+
+## Milestones per Arch
+1. Boot to `kmain` with console output.
+2. Paging enabled with correct maps.
+3. Interrupts firing; timer tick works.
+4. Context switch + scheduler tick proven.
+5. Syscall entry/exit path working (kernel-mode tests).
+6. User-mode test task making a syscall.
+
+## When to Switch
+- Finish Phase 3 on 32-bit x86 (syscalls + first ring3 task).
+- Schedule an x86_64 sprint when you need >4 GiB VA, modern protections (NX/SMEP/SMAP, PCID), or SYSCALL/SYSRET performance.
+- Do RISC-V after x86_64 using the same playbook.
+
+## RISC-V Notes (When Ready)
+- Simpler boot (no legacy segments), clean Sv39 paging, PLIC for interrupts.
+- Boot via OpenSBI to S-mode; set `stvec`, enable timer/interrupts, and handle ECALL.
+- Use `sfence.vma` for TLB shootdowns; save/restore S-mode CSRs in context switch.
 
-- ✅ **x86 (32-bit)** - Primary development target
-- 📋 **RISC-V** - Planned second architecture
-- 📋 **ARM** - Future consideration
-
-## HAL Abstraction Layer
-
-All architecture-specific code is isolated behind `struct hal_ops`:
-
-```c
-// include/kernel/hal.h
-struct hal_ops {
-    // CPU Management
-    void (*cpu_init)(void);
-    uint32_t (*cpu_id)(void);
-    void (*cpu_halt)(void);
-
-    // Interrupts
-    void (*irq_enable)(void);
-    uint32_t (*irq_disable)(void);
-    void (*irq_restore)(uint32_t state);
-
-    // Memory Management
-    void (*mmu_init)(void);
-    void* (*mmu_map)(phys_addr_t, virt_addr_t, uint32_t flags);
-    void (*mmu_flush_tlb)(virt_addr_t);
-
-    // I/O (may not exist on all architectures)
-    uint8_t (*io_inb)(uint16_t port);
-    void (*io_outb)(uint16_t port, uint8_t value);
-
-    // ... etc
-};
-
-extern struct hal_ops* hal;  // Points to architecture implementation
-```
-
-## Architecture-Specific vs Architecture-Neutral Code
-
-### Architecture-Neutral (Core Kernel)
-These components should have **zero** architecture-specific code:
-
-- ✅ **IPC subsystem** - Pure message passing logic
-- ✅ **Capability system** - Pure security policy
-- ✅ **Scheduler** - Priority queues, policy (uses HAL for context switch)
-- ✅ **Per-CPU infrastructure** - Data structures only
-- ✅ **VGA driver** - Memory-mapped I/O (uses HAL for mapping)
-- ✅ **String library** - Pure C
-- ✅ **List operations** - Pure C
-
-### Architecture-Specific (per arch/ directory)
-
-Each architecture must implement:
-
-1. **Boot code** (assembly)
-   - Set up stack
-   - Jump to `kmain()`
-   - x86: multiboot header, protected mode setup
-   - RISC-V: SBI setup, supervisor mode entry
-   - ARM: similar
-
-2. **HAL implementation** (C + inline assembly)
-   - File: `arch/ARCH/hal.c`
-   - Implements all `hal_ops` functions
-
-3. **Interrupt handling** (assembly + C)
-   - IDT/IVT setup
-   - Fast interrupt stubs
-   - Exception handlers
-
-4. **MMU/Paging** (C + assembly)
-   - Page table format varies by arch
-   - TLB management
-   - Address space switching
-
-5. **Context switching** (assembly)
-   - Save/restore registers
-   - Must be <200 cycles for RT
-
-6. **Syscall entry/exit** (assembly)
-   - x86: `int 0x80` or `sysenter`
-   - RISC-V: `ecall`
-   - ARM: `svc`
-
-7. **Atomics** (usually compiler builtins)
-   - `__sync_*` builtins work on all modern archs
-
-## Directory Structure
-
-```
-kernel/
-├── arch/
-│   ├── x86/
-│   │   ├── boot.s           # x86 multiboot boot
-│   │   ├── hal.c            # x86 HAL implementation
-│   │   ├── idt.c            # x86 interrupt handling
-│   │   ├── idt_asm.s        # x86 interrupt stubs
-│   │   ├── context.s        # x86 context switch
-│   │   ├── syscall.s        # x86 syscall entry
-│   │   └── linker.ld        # x86 linker script
-│   │
-│   ├── riscv/               # Future: RISC-V port
-│   │   ├── boot.s           # RISC-V boot
-│   │   ├── hal.c            # RISC-V HAL
-│   │   ├── trap.c           # RISC-V interrupt/exception handling
-│   │   ├── trap.s           # RISC-V trap vector
-│   │   ├── context.s        # RISC-V context switch
-│   │   └── linker.ld        # RISC-V linker script
-│   │
-│   └── arm/                 # Future: ARM port
-│       └── ...
-│
-├── core/                    # Architecture-neutral
-│   ├── init.c
-│   ├── percpu.c
-│   ├── scheduler.c          # (future)
-│   ├── ipc.c                # (future)
-│   └── capability.c         # (future)
-│
-├── include/
-│   ├── kernel/              # Architecture-neutral headers
-│   └── arch/                # Architecture-specific headers
-│       ├── x86/
-│       └── riscv/
-```
-
-## Adding a New Architecture: Checklist
-
-### Step 1: Boot and HAL
-- [ ] Create `arch/ARCH/boot.s` - minimal boot to C
-- [ ] Create `arch/ARCH/hal.c` - implement `hal_ops`
-- [ ] Create `arch/ARCH/linker.ld` - memory layout
-- [ ] Get to `kmain()` and print "Hello World"
-
-### Step 2: Interrupts
-- [ ] Create interrupt/exception handling
-- [ ] Implement timer interrupt
-- [ ] Wire up to HAL `irq_*` functions
-
-### Step 3: Memory Management
-- [ ] Implement page table creation
-- [ ] Implement `mmu_map` / `mmu_unmap`
-- [ ] Implement TLB flushing
-
-### Step 4: Scheduling
-- [ ] Implement context switch assembly
-- [ ] Test task switching
-- [ ] Verify <1µs context switch time
-
-### Step 5: Syscalls
-- [ ] Implement syscall entry/exit
-- [ ] Test ring3 → ring0 → ring3 transition
-- [ ] Verify IPC performance
-
-## RISC-V Port Details (When Ready)
-
-### Why RISC-V is a Good Second Architecture
-
-**Simpler than x86:**
-- No legacy baggage (no real mode, no segments, no TSS)
-- Orthogonal instruction set
-- Standard interrupt controller (PLIC)
-- Clean page table design (Sv39 is elegant)
-
-**Good for RT:**
-- Deterministic instruction timing
-- Simple pipeline
-- No microcode
-- Perfect for embedded RT systems
-
-### RISC-V Specifics
-
-**Boot:**
-- Use OpenSBI as firmware
-- Jump to supervisor mode
-- Set up trap vector
-
-**Interrupts:**
-- PLIC (Platform-Level Interrupt Controller)
-- Standard CSRs: `mtvec`, `stvec`, `sie`, `sip`
-- Traps go to single vector, dispatch in software
-
-**Paging:**
-- Sv39: 39-bit virtual addresses, 3-level page tables
-- Page table entry format different from x86
-- TLB flush: `sfence.vma` instruction
-
-**Context Switch:**
-- Save/restore 31 general-purpose registers
-- Save/restore CSRs (`sstatus`, `sepc`, etc.)
-- Probably <150 cycles (faster than x86!)
-
-**Syscalls:**
-- `ecall` instruction
-- Trap to supervisor mode
-- CSRs contain syscall number and args
-
-### RISC-V Estimated Effort
-
-- Boot + HAL: ~2 days
-- Interrupts: ~1 day
-- MMU: ~2 days
-- Context switch: ~1 day
-- Syscalls: ~1 day
-
-**Total: ~1 week** to port once x86 is solid.
-
-## Build System Changes Needed
-
-### Current (x86 only):
-```makefile
-ARCH := x86
-CC := i686-elf-gcc
-AS := i686-elf-as
-```
-
-### Future (multi-arch):
-```makefile
-# Set architecture (default x86)
-ARCH ?= x86
-
-# Architecture-specific toolchains
-ifeq ($(ARCH),x86)
-    CC := i686-elf-gcc
-    AS := i686-elf-as
-    CFLAGS += -m32
-endif
-
-ifeq ($(ARCH),riscv)
-    CC := riscv64-unknown-elf-gcc
-    AS := riscv64-unknown-elf-as
-    CFLAGS += -march=rv64imac -mabi=lp64
-endif
-
-# Architecture-specific sources
-ARCH_SOURCES := $(wildcard arch/$(ARCH)/*.c)
-ARCH_ASM := $(wildcard arch/$(ARCH)/*.s)
-
-# Architecture-neutral sources
-CORE_SOURCES := $(wildcard core/*.c)
-```
-
-## Testing Multi-Architecture Support
-
-### Before Adding Second Architecture:
-
-1. **Audit core/ for architecture assumptions**
-   - No hardcoded addresses
-   - No inline assembly outside arch/
-   - No x86-specific types
-
-2. **Check HAL coverage**
-   - All arch-specific operations go through HAL
-   - No direct hardware access in core/
-
-3. **Verify build isolation**
-   - `make ARCH=x86` doesn't leak into arch-neutral code
-   - Headers properly separated
-
-### After Adding RISC-V:
-
-1. **Ensure both architectures build**
-   - `make ARCH=x86` works
-   - `make ARCH=riscv` works
-
-2. **Run same tests on both**
-   - Boot test
-   - Exception handling test
-   - IPC performance test
-   - Context switch latency test
-
-3. **Compare performance**
-   - Document any architectural differences
-   - Ensure RT constraints met on both
-
-## Current Guidelines for x86 Development
-
-To keep our x86 code portable:
-
-### DO:
-- ✅ Use HAL for all hardware access
-- ✅ Keep arch-specific code in `arch/x86/`
-- ✅ Use standard C types (`uint32_t`, not `unsigned long`)
-- ✅ Document any x86 assumptions in comments
-
-### DON'T:
-- ❌ Put inline assembly in `core/` or `lib/`
-- ❌ Hardcode I/O ports outside arch code
-- ❌ Assume little-endian (use explicit conversions if needed)
-- ❌ Assume 32-bit pointers (use `uintptr_t`)
-
-## Example: Portable vs Non-Portable Code
-
-### ❌ Non-Portable:
-```c
-// core/interrupt.c - BAD!
-void handle_interrupt(void) {
-    // Direct x86 I/O - not portable!
-    outb(0x20, 0x20);  // Send EOI to PIC
-}
-```
-
-### ✅ Portable:
-```c
-// core/interrupt.c - GOOD!
-void handle_interrupt(void) {
-    // Use HAL abstraction
-    hal->irq_send_eoi(irq_num);
-}
-
-// arch/x86/hal.c
-static void irq_send_eoi(uint32_t irq) {
-    // x86-specific: 8259 PIC
-    if (irq >= 8) {
-        outb(0xA0, 0x20);
-    }
-    outb(0x20, 0x20);
-}
-
-// arch/riscv/hal.c (future)
-static void irq_send_eoi(uint32_t irq) {
-    // RISC-V: clear pending bit in PLIC
-    plic_complete(irq);
-}
-```
-
-## When to Add RISC-V
-
-**After completing Phase 4 (IPC + Capabilities) on x86:**
-- Core microkernel is working
-- HAL abstraction validated
-- IPC performance measured
-- RT constraints verified
-
-**Why wait:**
-- Don't complicate development with two architectures
-- Validate design on one platform first
-- Once working, port is quick (~1 week)
-
-**Benefits of adding RISC-V:**
-- Proves HAL abstraction works
-- Exposes x86-specific assumptions
-- Opens up embedded RT market
-- Simpler ISA is easier to reason about for verification
-
-## Conclusion
-
-Multi-architecture support is **definitely feasible** with our HAL design. The strategy:
-
-1. ✅ **Complete x86 implementation first** (Phases 1-4)
-2. 📋 Port to RISC-V to validate abstraction (~1 week)
-3. 📋 Consider ARM if needed for specific use cases
-
-Keep writing portable code, and the port will be straightforward when ready!

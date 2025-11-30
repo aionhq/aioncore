@@ -105,6 +105,15 @@ struct task {
 void task_init(void);
 
 /**
+ * Allocate a new task structure
+ *
+ * @return  Pointer to allocated task, or NULL on failure
+ *
+ * RT: O(1) - single page allocation
+ */
+task_t* task_alloc(void);
+
+/**
  * Create a new kernel thread
  *
  * @param name          Human-readable name

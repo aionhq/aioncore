@@ -17,12 +17,14 @@ static uint32_t detect_cpu_features(void) {
 
 // ========== CPU Management ==========
 
-// Forward declaration
+// Forward declarations
+extern void gdt_init(void);
 extern void idt_init(void);
 
 static void cpu_init(void) {
-    // TODO: Initialize GDT (Global Descriptor Table)
-    // For now, boot.s and GRUB set up a basic GDT
+    // Initialize GDT (Global Descriptor Table)
+    // Sets up ring 0 (kernel) and ring 3 (user) segments + TSS
+    gdt_init();
 
     // Initialize IDT (Interrupt Descriptor Table)
     idt_init();

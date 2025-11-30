@@ -182,6 +182,12 @@ void idt_init(void) {
     idt_set_gate(46, (uint32_t)irq14, 0x08, 0x8E);
     idt_set_gate(47, (uint32_t)irq15, 0x08, 0x8E);
 
+    // Install syscall handler (INT 0x80)
+    // CRITICAL: Use 0xEE (DPL=3, interrupt gate) to allow ring 3 calls
+    // 0x8E would be DPL=0 and block userspace with #GP
+    extern void syscall_entry_int80(void);
+    idt_set_gate(0x80, (uint32_t)syscall_entry_int80, 0x08, 0xEE);
+
     // Load IDT
     __asm__ volatile("lidt %0" : : "m"(idtr));
 }
@@ -269,4 +275,11 @@ void irq_handler(struct interrupt_frame* frame) {
     }
     // Master PIC
     hal->io_outb(0x20, 0x20);
+
+    // Check if we need to reschedule (for preemptive scheduling)
+    extern bool scheduler_need_resched(void);
+    extern void schedule(void);
+    if (scheduler_need_resched()) {
+        schedule();
+    }
 }
