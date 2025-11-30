@@ -29,7 +29,8 @@ make clean
 ## Current Status
 
 **Phase 1:** ✅ Foundation complete (HAL, per-CPU, IDT, VGA)
-**Phase 2:** 🔨 In progress (Timer, memory, paging)
+**Phase 2:** ✅ Complete (Timer, PMM, MMU/paging)
+**Phase 3:** 🔨 In progress (Tasks, scheduler - cooperative mode working)
 
 👉 **See [CURRENT_WORK.md](CURRENT_WORK.md) for today's status and next steps.**
 
@@ -124,22 +125,45 @@ kernel/
 
 ## Features
 
-### ✅ Implemented (Phase 1 & 2.1)
+### ✅ Implemented (Phases 1-3.1)
 
+**Foundation & HAL:**
 - Hardware Abstraction Layer (HAL)
 - Per-CPU data structures (cache-line aligned)
 - IDT and interrupt handling (256 entries)
 - Exception handlers with register dumps
-- Modular VGA driver with kprintf
 - Safe string library (no strcpy/strcat)
 - Lock-free per-CPU tracing
+
+**Drivers & Console:**
+- Modular VGA driver with kprintf
+- Serial UART driver (8250/16550, 115200 baud)
+- Console multiplexer (VGA + serial dual output)
+
+**Timing:**
 - PIT timer with TSC calibration (1000 Hz, microsecond precision)
-- Unit testing framework (ktest) with example tests
 
-### 🔨 In Progress (Phase 2.2)
+**Memory Management:**
+- Physical memory manager (PMM, bitmap-based)
+- MMU with x86 paging (identity-mapped kernel)
+- O(1) page map/unmap operations
 
-- Physical memory manager (bitmap-based)
-- Basic paging and address spaces
+**Tasks & Scheduling:**
+- Task management (create, destroy, yield)
+- O(1) scheduler (256 priority levels)
+- Context switching (< 200 cycles)
+- Cooperative scheduling working
+
+**Testing & Development:**
+- Unit testing framework (ktest)
+- Host-side unit tests for logic validation
+- Direct QEMU kernel boot (5x faster iteration)
+
+### 🔨 In Progress (Phase 3.2)
+
+- Preemptive scheduling (blocked by interrupt handling issue)
+- Syscall mechanism
+- Userspace tasks
 
 ### 📋 Planned
 
@@ -192,8 +216,14 @@ make
 # Clean build
 make clean && make
 
-# Run in QEMU
+# Run in QEMU (direct kernel boot - fast)
 make run
+
+# Run in QEMU (GRUB/ISO boot)
+make run-iso
+
+# Run in QEMU (terminal only, no GUI)
+make run-nographic
 
 # Build and run with unit tests
 make test

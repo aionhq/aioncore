@@ -84,4 +84,7 @@ void vga_set_color(enum vga_color fg, enum vga_color bg);
 // kprintf - kernel printf (minimal implementation)
 int kprintf(const char* format, ...) __attribute__((format(printf, 1, 2)));
 
+/* Get VGA console backend for console multiplexer */
+struct console_backend* vga_get_console_backend(void);
+
 #endif // DRIVERS_VGA_H

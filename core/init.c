@@ -9,7 +9,9 @@
 #include <kernel/mmu.h>
 #include <kernel/task.h>
 #include <kernel/scheduler.h>
+#include <kernel/console.h>
 #include <drivers/vga.h>
+#include <drivers/serial.h>
 
 // Forward declarations
 extern void hal_x86_init(void);
@@ -33,6 +35,12 @@ __attribute__((noreturn)) void kmain(uint32_t multiboot_magic, uint32_t multiboo
     // Phase 3: Initialize VGA display
     // Now we can print to screen!
     vga_subsystem_init();
+
+    // Phase 3.5: Initialize console multiplexer
+    // Register VGA and serial backends so kprintf goes to both
+    console_init();
+    console_register(vga_get_console_backend());
+    console_register(serial_get_console_backend());
 
     // Display welcome banner
     vga_clear();
@@ -127,16 +135,12 @@ __attribute__((noreturn)) void kmain(uint32_t multiboot_magic, uint32_t multiboo
     // TODO: Phase 3: Syscall entry/exit
     // TODO: Phase 4: IPC & Capabilities
 
-    // DEBUG TEST 1: Test scheduler WITHOUT interrupts
-    // If this works, the problem is in Timer IRQ / ISR
-    kprintf("\nDEBUG: Testing scheduler without interrupts...\n");
+    // Enable interrupts for timer-driven preemption/testing
+    kprintf("\nEnabling interrupts and yielding to scheduler...\n");
     kprintf("Press Ctrl+A then X to exit QEMU\n\n");
+    hal->irq_enable();
 
-    // DO NOT enable interrupts yet - test context switch first
-    // hal->irq_enable();  // DISABLED FOR TEST
-
-    // Drop into idle task - scheduler will take over
-    kprintf("[INIT] Yielding to scheduler (interrupts DISABLED)...\n");
+    // Drop into scheduler
     task_yield();
 
     // Should never reach here

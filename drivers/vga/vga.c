@@ -2,6 +2,7 @@
 
 #include <drivers/vga.h>
 #include <kernel/types.h>
+#include <kernel/console.h>
 #include <stdarg.h>
 
 // External driver
@@ -248,11 +249,11 @@ int kprintf(const char* format, ...) {
                     // Apply padding if specified
                     if (zero_pad && width > len) {
                         for (int i = len; i < width; i++) {
-                            vga->putchar('0');
+                            console_putchar('0');
                             written++;
                         }
                     }
-                    vga->write(buf, len);
+                    console_write(buf, len);
                     written += len;
                     break;
                 }
@@ -274,11 +275,11 @@ int kprintf(const char* format, ...) {
                     // Apply padding if specified
                     if (zero_pad && width > len) {
                         for (int i = len; i < width; i++) {
-                            vga->putchar('0');
+                            console_putchar('0');
                             written++;
                         }
                     }
-                    vga->write(buf, len);
+                    console_write(buf, len);
                     written += len;
                     break;
                 }
@@ -301,26 +302,26 @@ int kprintf(const char* format, ...) {
                     // Apply padding if specified
                     if (zero_pad && width > len) {
                         for (int i = len; i < width; i++) {
-                            vga->putchar('0');
+                            console_putchar('0');
                             written++;
                         }
                     }
-                    vga->write(buf, len);
+                    console_write(buf, len);
                     written += len;
                     break;
                 }
 
                 case 'p': {  // Pointer
-                    vga->write("0x", 2);
+                    console_write("0x", 2);
                     uintptr_t ptr = (uintptr_t)va_arg(args, void*);
                     uint32_t val = (uint32_t)ptr;
                     int len = utoa(val, buf, 16);
                     // Pad to 8 digits
                     for (int i = len; i < 8; i++) {
-                        vga->putchar('0');
+                        console_putchar('0');
                         written++;
                     }
-                    vga->write(buf, len);
+                    console_write(buf, len);
                     written += len + 2;
                     break;
                 }
@@ -332,35 +333,35 @@ int kprintf(const char* format, ...) {
                     }
                     size_t len = 0;
                     while (str[len]) len++;
-                    vga->write(str, len);
+                    console_write(str, len);
                     written += len;
                     break;
                 }
 
                 case 'c': {  // Character
                     char c = (char)va_arg(args, int);
-                    vga->putchar(c);
+                    console_putchar(c);
                     written++;
                     break;
                 }
 
                 case '%': {  // Literal %
-                    vga->putchar('%');
+                    console_putchar('%');
                     written++;
                     break;
                 }
 
                 default:
                     // Unknown format, print as-is
-                    vga->putchar('%');
-                    vga->putchar(*format);
+                    console_putchar('%');
+                    console_putchar(*format);
                     written += 2;
                     break;
             }
 
             format++;
         } else {
-            vga->putchar(*format);
+            console_putchar(*format);
             written++;
             format++;
         }

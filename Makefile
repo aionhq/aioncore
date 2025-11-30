@@ -45,6 +45,7 @@ C_SOURCES := $(CORE_DIR)/init.c \
              $(CORE_DIR)/percpu.c \
              $(CORE_DIR)/task.c \
              $(CORE_DIR)/scheduler.c \
+             $(CORE_DIR)/console.c \
              $(ARCH_DIR)/hal.c \
              $(ARCH_DIR)/idt.c \
              $(ARCH_DIR)/timer.c \
@@ -52,7 +53,10 @@ C_SOURCES := $(CORE_DIR)/init.c \
              $(MM_DIR)/pmm.c \
              $(LIB_DIR)/string.c \
              $(DRIVERS_DIR)/vga/vga.c \
-             $(DRIVERS_DIR)/vga/vga_text.c
+             $(DRIVERS_DIR)/vga/vga_text.c \
+             $(DRIVERS_DIR)/vga/vga_console.c \
+             $(DRIVERS_DIR)/serial/uart.c \
+             $(DRIVERS_DIR)/serial/serial_console.c
 
 # Test sources (optional, enabled with KERNEL_TESTS=1)
 ifdef KERNEL_TESTS
